@@ -1,0 +1,8181 @@
+import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import 'package:intl/intl.dart';
+
+// Fonction globale pour formater les montants
+String formatCurrency(double amount) {
+  return NumberFormat('#,###', 'fr_FR').format(amount).replaceAll(',', ' ');
+}
+
+String? _amountValidator(String? value) {
+  final amount = double.tryParse(
+    (value ?? '').trim().replaceAll(' ', '').replaceAll(',', '.'),
+  );
+  if (amount == null || amount < 0) {
+    return 'Saisissez un solde égal ou supérieur à zéro';
+  }
+  return null;
+}
+
+String _normalizeUniqueValue(String value) =>
+    value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+Future<void> _showDuplicateAlert(BuildContext context, String subject) async {
+  await _showInfoAlert(
+    context,
+    title: 'Doublon détecté',
+    message: '$subject existe déjà. Vérifiez les informations saisies.',
+  );
+}
+
+Future<void> _showInfoAlert(
+  BuildContext context, {
+  required String title,
+  required String message,
+}) async {
+  await showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: Text(message),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Compris'),
+        ),
+      ],
+    ),
+  );
+}
+
+void main() {
+  runApp(const TransitTrackerApp());
+}
+
+const _moduleNames = [
+  'Gestion',
+  'Prestation',
+  'Recouvrement',
+  'Transport',
+  'Transitaire',
+  'Comptabilité',
+  'RH & Paie',
+];
+
+class ErpUser {
+  final String id;
+  String name;
+  String login;
+  String password;
+  String role;
+  Set<String> accessModules;
+
+  ErpUser({
+    required this.id,
+    required this.name,
+    required this.login,
+    required this.password,
+    required this.role,
+    required this.accessModules,
+  });
+}
+
+final List<ErpUser> _erpUsers = [
+  ErpUser(
+    id: 'admin',
+    name: 'Administrateur',
+    login: 'admin',
+    password: '1234',
+    role: 'Administrateur',
+    accessModules: _moduleNames.toSet(),
+  ),
+];
+
+class TransitTrackerApp extends StatelessWidget {
+  const TransitTrackerApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'SYLLA TRANSIT & TRANSPORT',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1A237E)),
+        useMaterial3: true,
+        fontFamily: 'Roboto',
+      ),
+      home: const LoginPage(),
+    );
+  }
+}
+
+// --- PAGE DE CONNEXION OPTIMISÉE WEB ---
+
+class LoginPage extends StatefulWidget {
+  const LoginPage({super.key});
+
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends State<LoginPage> {
+  final _userCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+  bool _obscure = true;
+
+  void _login() {
+    final matches = _erpUsers.where(
+      (entry) =>
+          _normalizeUniqueValue(entry.login) ==
+              _normalizeUniqueValue(_userCtrl.text) &&
+          entry.password == _passCtrl.text,
+    );
+    if (matches.isNotEmpty) {
+      final account = matches.first;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => MainNavigationPage(
+            userDisplayName: account.name,
+            userRole: account.role,
+            authorizedModules: account.accessModules,
+          ),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Identifiant ou mot de passe incorrect.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF1A237E), Color(0xFF3949AB)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Center(
+          child: SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 450),
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Card(
+                  elevation: 15,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(25),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 30,
+                      vertical: 50,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Image.asset(
+                          'assets/logo.png',
+                          height: 100,
+                          errorBuilder: (context, error, stackTrace) =>
+                              const Icon(
+                                Icons.local_shipping_rounded,
+                                size: 80,
+                                color: Color(0xFF1A237E),
+                              ),
+                        ),
+                        const SizedBox(height: 15),
+                        const Text(
+                          "ESPACE GESTION",
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1A237E),
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                        const Text(
+                          "SYLLA TRANSIT & TRANSPORT",
+                          style: TextStyle(fontSize: 14, color: Colors.grey),
+                        ),
+                        const SizedBox(height: 40),
+                        TextField(
+                          controller: _userCtrl,
+                          decoration: InputDecoration(
+                            labelText: "Utilisateur",
+                            prefixIcon: const Icon(Icons.person_outline),
+                            filled: true,
+                            fillColor: Colors.grey[50],
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(15),
+                              borderSide: BorderSide(
+                                color: Colors.grey.shade300,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(15),
+                              borderSide: const BorderSide(
+                                color: Color(0xFF1A237E),
+                                width: 2,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        TextField(
+                          controller: _passCtrl,
+                          obscureText: _obscure,
+                          decoration: InputDecoration(
+                            labelText: "Mot de passe",
+                            prefixIcon: const Icon(Icons.lock_outline),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _obscure
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                              ),
+                              onPressed: () =>
+                                  setState(() => _obscure = !_obscure),
+                            ),
+                            filled: true,
+                            fillColor: Colors.grey[50],
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(15),
+                              borderSide: BorderSide(
+                                color: Colors.grey.shade300,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(15),
+                              borderSide: const BorderSide(
+                                color: Color(0xFF1A237E),
+                                width: 2,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 35),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 55,
+                          child: ElevatedButton(
+                            onPressed: _login,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF1A237E),
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(15),
+                              ),
+                              elevation: 5,
+                            ),
+                            child: const Text(
+                              "SE CONNECTER",
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// --- MODÈLES ---
+
+class Client {
+  final String id, nom, telephone;
+  final String societe;
+  final String adresse;
+  final String email;
+  final String rccm;
+  final double soldeInitial;
+  final bool assujettiTva;
+  String compteComptable;
+
+  Client({
+    required this.id,
+    required this.nom,
+    required this.telephone,
+    this.societe = '',
+    this.adresse = '',
+    this.email = '',
+    this.rccm = '',
+    this.soldeInitial = 0,
+    this.assujettiTva = false,
+    this.compteComptable = '',
+  });
+}
+
+class PlanAccount {
+  final String id;
+  String code;
+  String libelle;
+  String nature;
+  String? tiersId;
+  final double soldeInitial;
+  final bool assujettiTva;
+
+  PlanAccount({
+    required this.id,
+    required this.code,
+    required this.libelle,
+    required this.nature,
+    this.tiersId,
+    this.soldeInitial = 0,
+    this.assujettiTva = false,
+  });
+}
+
+const _accountNatures = [
+  'Aucun',
+  'Salarié',
+  'Résultat-Gestion',
+  'Capitaux',
+  'Stock',
+  'Titre',
+  'Résultat-Bilan',
+  'Immobilisation',
+  'Client',
+  'Fournisseur',
+  'Banque',
+  'Caisse',
+  'Charge',
+  'Produit',
+];
+
+class Depense {
+  final String titre, categorie, date;
+  final double montant;
+  Depense({
+    required this.titre,
+    required this.montant,
+    required this.categorie,
+    required this.date,
+  });
+}
+
+enum DossierOperationType {
+  expense,
+  clientInvoice,
+  clientPayment,
+  providerInvoice,
+  providerAdvance,
+  providerPayment,
+}
+
+enum DossierInvoiceKind { client, provider, forwarder, carrier }
+
+enum SettlementKind { client, supplier, forwarder, carrier }
+
+class Voyage {
+  final String id;
+  String dossierId;
+  String plaque;
+  String chauffeur;
+  String origine;
+  String destination;
+  String depart;
+  String arriveePrevue;
+  String statut;
+
+  Voyage({
+    required this.id,
+    required this.dossierId,
+    required this.plaque,
+    required this.chauffeur,
+    required this.origine,
+    required this.destination,
+    required this.depart,
+    required this.arriveePrevue,
+    required this.statut,
+  });
+}
+
+class InvoiceLine {
+  final String description;
+  final double quantite;
+  final double prixUnitaire;
+  final String numeroConteneur;
+  final String bl;
+  final String marchandise;
+  final String typeConteneur;
+  final double fraisTransit;
+  final double volumePoids;
+  final double surestariesMagasinage;
+  final double fraisPeage;
+  final double autresFrais;
+  final double avanceCamion;
+  final String plaqueVehicule;
+
+  const InvoiceLine({
+    required this.description,
+    required this.quantite,
+    required this.prixUnitaire,
+    this.numeroConteneur = '',
+    this.bl = '',
+    this.marchandise = '',
+    this.typeConteneur = '',
+    this.fraisTransit = 0,
+    this.volumePoids = 0,
+    this.surestariesMagasinage = 0,
+    this.fraisPeage = 0,
+    this.autresFrais = 0,
+    this.avanceCamion = 0,
+    this.plaqueVehicule = '',
+  });
+
+  double get total => quantite * prixUnitaire;
+  double get totalPrestataire =>
+      fraisTransit +
+      volumePoids +
+      surestariesMagasinage +
+      fraisPeage +
+      autresFrais;
+}
+
+class DossierInvoice {
+  final String id;
+  final String reference;
+  final DossierInvoiceKind kind;
+  String description;
+  double montant;
+  String statut;
+  String dateEmission;
+  List<InvoiceLine> lignes;
+
+  DossierInvoice({
+    required this.id,
+    required this.reference,
+    required this.kind,
+    this.description = '',
+    this.montant = 0,
+    this.statut = 'Brouillon',
+    this.dateEmission = '',
+    List<InvoiceLine>? lignes,
+  }) : lignes = lignes ?? [];
+}
+
+class JournalCode {
+  String code;
+  String intitule;
+  String type;
+  String compteTresorerie;
+
+  JournalCode({
+    required this.code,
+    required this.intitule,
+    required this.type,
+    required this.compteTresorerie,
+  });
+}
+
+class DossierOperation {
+  final DossierOperationType type;
+  final String titre;
+  final String categorie;
+  final double montant;
+  final String date;
+  final String codeJournal;
+
+  const DossierOperation({
+    required this.type,
+    required this.titre,
+    this.categorie = '',
+    required this.montant,
+    required this.date,
+    this.codeJournal = '',
+  });
+}
+
+class TransitDossier {
+  final String id, numDossier, numBL, numLB;
+  final Client client;
+  final int nbConteneurs;
+  final String transitaire;
+  final String dateCreation;
+  final String typeFacturation;
+  final String priorite;
+  final String typeMarchandise;
+  final String lieuMarchandise;
+  final String lieuLivraison;
+  final String dateArriveeBateau;
+  final String description;
+  final List<TransitContainer> conteneurs;
+  Prestataire? prestataire;
+  Prestataire? transitaireAffecte;
+  Prestataire? transporteurAffecte;
+  final DossierInvoice factureClient;
+  final DossierInvoice facturePrestataire;
+  final DossierInvoice factureTransitaire;
+  final DossierInvoice factureTransporteur;
+  String dateDebut, dateFin, statut;
+  List<Depense> depenses;
+  List<DossierOperation> operations;
+
+  TransitDossier({
+    required this.id,
+    required this.numDossier,
+    required this.numBL,
+    required this.numLB,
+    required this.client,
+    required this.nbConteneurs,
+    required this.dateDebut,
+    this.transitaire = '',
+    this.dateCreation = '',
+    this.typeFacturation = 'Tarif complet',
+    this.priorite = 'Priorité normale',
+    this.typeMarchandise = '',
+    this.lieuMarchandise = '',
+    this.lieuLivraison = '',
+    this.dateArriveeBateau = '',
+    this.description = '',
+    this.prestataire,
+    DossierInvoice? factureClient,
+    DossierInvoice? facturePrestataire,
+    DossierInvoice? factureTransitaire,
+    DossierInvoice? factureTransporteur,
+    List<TransitContainer>? conteneurs,
+    this.dateFin = "-",
+    this.statut = "Ouvert",
+    List<Depense>? depenses,
+    List<DossierOperation>? operations,
+  }) : factureClient =
+           factureClient ??
+           DossierInvoice(
+             id: '$id-client',
+             reference: 'FC-$numDossier',
+             kind: DossierInvoiceKind.client,
+           ),
+       facturePrestataire =
+           facturePrestataire ??
+           DossierInvoice(
+             id: '$id-provider',
+             reference: 'FP-$numDossier',
+             kind: DossierInvoiceKind.provider,
+           ),
+       factureTransitaire =
+           factureTransitaire ??
+           DossierInvoice(
+             id: '$id-forwarder',
+             reference: 'FT-$numDossier',
+             kind: DossierInvoiceKind.forwarder,
+           ),
+       factureTransporteur =
+           factureTransporteur ??
+           DossierInvoice(
+             id: '$id-carrier',
+             reference: 'FTR-$numDossier',
+             kind: DossierInvoiceKind.carrier,
+           ),
+       conteneurs = conteneurs ?? [],
+       depenses = depenses ?? [],
+       operations = operations ?? [];
+
+  double get totalDepenses =>
+      depenses.fold(0, (sum, item) => sum + item.montant);
+
+  double get totalFacturesClient =>
+      (factureClient.statut == 'Clôturée' ? factureClient.montant : 0) +
+      operations
+          .where((entry) => entry.type == DossierOperationType.clientInvoice)
+          .fold(0, (sum, entry) => sum + entry.montant);
+
+  double get totalReglementsClient => operations
+      .where((entry) => entry.type == DossierOperationType.clientPayment)
+      .fold(0, (sum, entry) => sum + entry.montant);
+
+  double get soldeClient => totalFacturesClient - totalReglementsClient;
+
+  double get totalFacturesPrestataire =>
+      (facturePrestataire.statut == 'Clôturée'
+          ? facturePrestataire.montant
+          : 0) +
+      (factureTransitaire.statut == 'Clôturée'
+          ? factureTransitaire.montant
+          : 0) +
+      (factureTransporteur.statut == 'Clôturée'
+          ? factureTransporteur.montant
+          : 0) +
+      operations
+          .where((entry) => entry.type == DossierOperationType.providerInvoice)
+          .fold(0, (sum, entry) => sum + entry.montant);
+
+  double get totalAvancesPrestataire => operations
+      .where((entry) => entry.type == DossierOperationType.providerAdvance)
+      .fold(0, (sum, entry) => sum + entry.montant);
+
+  double get totalReglementsPrestataire => operations
+      .where((entry) => entry.type == DossierOperationType.providerPayment)
+      .fold(0, (sum, entry) => sum + entry.montant);
+
+  double get soldePrestataire =>
+      totalFacturesPrestataire -
+      totalAvancesPrestataire -
+      totalReglementsPrestataire;
+
+  bool get peutCloturer =>
+      statut != 'Clôturé' &&
+      prestataire != null &&
+      factureClient.statut == 'Clôturée' &&
+      (prestataire!.type == 'Transitaire'
+          ? factureTransitaire.statut == 'Clôturée'
+          : prestataire!.type == 'Transporteur'
+          ? factureTransporteur.statut == 'Clôturée'
+          : facturePrestataire.statut == 'Clôturée') &&
+      soldeClient <= 0 &&
+      soldePrestataire <= 0;
+}
+
+class TransitContainer {
+  final String numero;
+  final String type;
+  final String marchandise;
+
+  const TransitContainer({
+    required this.numero,
+    required this.type,
+    required this.marchandise,
+  });
+}
+
+class Prestataire {
+  final String id;
+  final String entreprise;
+  final String type;
+  final String pays;
+  final String villePort;
+  final String contact;
+  final String telephone;
+  final String email;
+  final String services;
+  final String adresse;
+  final String rccm;
+  final int nombreVehicules;
+  final double soldeInitial;
+  String compteComptable;
+
+  Prestataire({
+    required this.id,
+    required this.entreprise,
+    required this.type,
+    required this.pays,
+    required this.villePort,
+    required this.contact,
+    required this.telephone,
+    required this.email,
+    required this.services,
+    this.adresse = '',
+    this.rccm = '',
+    this.nombreVehicules = 0,
+    this.soldeInitial = 0,
+    this.compteComptable = '',
+  });
+}
+
+class SearchableDropdownFormField<T extends Object> extends StatefulWidget {
+  final List<T> options;
+  final T? value;
+  final String label;
+  final String emptyText;
+  final bool required;
+  final String Function(T) displayString;
+  final ValueChanged<T?> onChanged;
+
+  const SearchableDropdownFormField({
+    super.key,
+    required this.options,
+    required this.value,
+    required this.label,
+    required this.emptyText,
+    this.required = true,
+    required this.displayString,
+    required this.onChanged,
+  });
+
+  @override
+  State<SearchableDropdownFormField<T>> createState() =>
+      _SearchableDropdownFormFieldState<T>();
+}
+
+class _SearchableOption<T extends Object> {
+  final T value;
+  final String label;
+
+  const _SearchableOption(this.value, this.label);
+}
+
+class _SearchableDropdownFormFieldState<T extends Object>
+    extends State<SearchableDropdownFormField<T>> {
+  T? _selectedValue;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedValue = widget.value;
+  }
+
+  @override
+  void didUpdateWidget(covariant SearchableDropdownFormField<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.value != oldWidget.value) {
+      _selectedValue = widget.value;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Autocomplete<_SearchableOption<T>>(
+      initialValue: TextEditingValue(
+        text: widget.value == null ? '' : widget.displayString(widget.value!),
+      ),
+      displayStringForOption: (option) => option.label,
+      optionsBuilder: (textEditingValue) {
+        final query = textEditingValue.text.trim().toLowerCase();
+        final options = widget.options
+            .map(
+              (option) =>
+                  _SearchableOption(option, widget.displayString(option)),
+            )
+            .toList();
+        if (query.isEmpty) return options;
+        return options.where(
+          (option) => option.label.toLowerCase().contains(query),
+        );
+      },
+      onSelected: (option) {
+        setState(() => _selectedValue = option.value);
+        widget.onChanged(option.value);
+      },
+      fieldViewBuilder: (context, controller, focusNode, onSubmitted) {
+        return TextFormField(
+          controller: controller,
+          focusNode: focusNode,
+          validator: (_) {
+            return widget.required && _selectedValue == null
+                ? 'Sélectionnez une valeur dans la liste'
+                : null;
+          },
+          onChanged: (text) {
+            if (_selectedValue != null &&
+                text != widget.displayString(_selectedValue as T)) {
+              setState(() => _selectedValue = null);
+              widget.onChanged(null);
+            }
+          },
+          decoration: InputDecoration(
+            labelText: widget.label,
+            hintText: widget.options.isEmpty ? widget.emptyText : 'Rechercher…',
+            prefixIcon: const Icon(Icons.search_rounded),
+            suffixIcon: IconButton(
+              tooltip: 'Afficher la liste',
+              onPressed: () {
+                focusNode.requestFocus();
+                controller.clear();
+              },
+              icon: const Icon(Icons.arrow_drop_down),
+            ),
+            border: const OutlineInputBorder(),
+          ),
+        );
+      },
+      optionsViewBuilder: (context, onSelected, options) => Align(
+        alignment: Alignment.topLeft,
+        child: Material(
+          elevation: 8,
+          borderRadius: BorderRadius.circular(10),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 240, maxWidth: 420),
+            child: ListView(
+              padding: EdgeInsets.zero,
+              shrinkWrap: true,
+              children: options
+                  .map(
+                    (option) => ListTile(
+                      title: Text(option.label),
+                      onTap: () => onSelected(option),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ErpMenuItem {
+  final String title;
+  final IconData icon;
+
+  const ErpMenuItem(this.title, this.icon);
+}
+
+class ErpModule {
+  final String title;
+  final IconData icon;
+  final List<ErpMenuItem> items;
+
+  const ErpModule(this.title, this.icon, this.items);
+}
+
+// --- NAVIGATION PRINCIPALE ---
+
+class MainNavigationPage extends StatefulWidget {
+  final String userDisplayName;
+  final String userRole;
+  final Set<String> authorizedModules;
+
+  const MainNavigationPage({
+    super.key,
+    this.userDisplayName = 'Administrateur',
+    this.userRole = 'Administrateur',
+    this.authorizedModules = const {
+      'Gestion',
+      'Prestation',
+      'Recouvrement',
+      'Transport',
+      'Transitaire',
+      'Comptabilité',
+      'RH & Paie',
+    },
+  });
+  @override
+  State<MainNavigationPage> createState() => _MainNavigationPageState();
+}
+
+class _MainNavigationPageState extends State<MainNavigationPage> {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
+  static final List<Client> _clients = [];
+  static final List<TransitDossier> _dossiers = [];
+  static final List<Prestataire> _prestataires = [];
+  static final List<PlanAccount> _planAccounts = [];
+  static final List<JournalCode> _journalCodes = [];
+  static final List<Voyage> _voyages = [];
+
+  static const List<ErpModule> _modules = [
+    ErpModule('Gestion', Icons.space_dashboard_rounded, [
+      ErpMenuItem('Accueil', Icons.home_rounded),
+      ErpMenuItem('Gestion utilisateur', Icons.manage_accounts_rounded),
+      ErpMenuItem('Indicateur Performance (KPI)', Icons.insights_rounded),
+    ]),
+    ErpModule('Prestation', Icons.room_service_rounded, [
+      ErpMenuItem('Facture Client', Icons.request_quote_rounded),
+      ErpMenuItem('Facture Prestataire', Icons.receipt_long_rounded),
+      ErpMenuItem('Facture Transitaire', Icons.directions_boat_rounded),
+      ErpMenuItem('Facture Transporteur', Icons.local_shipping_rounded),
+      ErpMenuItem('Espace Prestataire', Icons.business_center_rounded),
+    ]),
+    ErpModule('Recouvrement', Icons.price_check_rounded, [
+      ErpMenuItem('Etat des Impayés', Icons.receipt_long_rounded),
+      ErpMenuItem('Relance des Impayés', Icons.notifications_active_rounded),
+      ErpMenuItem('Règlement', Icons.payments_rounded),
+      ErpMenuItem(
+        'Saisie des Règlements Transporteurs',
+        Icons.local_shipping_rounded,
+      ),
+    ]),
+    ErpModule('Transport', Icons.local_shipping_rounded, [
+      ErpMenuItem('Dossier', Icons.folder_copy_rounded),
+      ErpMenuItem('Gestion des dépenses', Icons.money_off_csred_rounded),
+      ErpMenuItem('Gestion des Avances', Icons.account_balance_wallet_rounded),
+      ErpMenuItem('Voyages', Icons.route_rounded),
+      ErpMenuItem('Historique', Icons.history_rounded),
+    ]),
+    ErpModule('Transitaire', Icons.directions_boat_rounded, [
+      ErpMenuItem('Gestion des Transitaires & Chargeurs', Icons.groups_rounded),
+      ErpMenuItem('Clients', Icons.people_rounded),
+    ]),
+    ErpModule('Comptabilité', Icons.account_balance_rounded, [
+      ErpMenuItem('Balance des Comptes', Icons.balance_rounded),
+      ErpMenuItem('Balance Agées', Icons.pending_actions_rounded),
+      ErpMenuItem('Control des Caisses', Icons.point_of_sale_rounded),
+      ErpMenuItem('Règlements', Icons.payments_rounded),
+      ErpMenuItem('Dépenses & Frais', Icons.receipt_long_rounded),
+      ErpMenuItem('Interrogation et Lettrage', Icons.search_rounded),
+      ErpMenuItem('Grand-Livre des Tiers', Icons.menu_book_rounded),
+      ErpMenuItem('Saisie des Journaux', Icons.edit_note_rounded),
+      ErpMenuItem('Code journaux', Icons.menu_book_rounded),
+      ErpMenuItem('Plan Comptable', Icons.account_tree_rounded),
+      ErpMenuItem('Rapprochement Bancaire', Icons.compare_arrows_rounded),
+    ]),
+    ErpModule('RH & Paie', Icons.badge_rounded, [
+      ErpMenuItem('Espace RH & Paie', Icons.badge_rounded),
+    ]),
+  ];
+
+  int _selectedModuleIndex = 0;
+  String _selectedMenuTitle = 'Accueil';
+  final List<({int moduleIndex, String title})> _openPages = [
+    (moduleIndex: 0, title: 'Accueil'),
+  ];
+
+  List<int> get _visibleModuleIndexes => [
+    for (var index = 0; index < _modules.length; index++)
+      if (widget.authorizedModules.contains(_modules[index].title)) index,
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.authorizedModules.contains('Gestion')) return;
+    final visibleIndexes = _visibleModuleIndexes;
+    if (visibleIndexes.isEmpty) return;
+    _selectedModuleIndex = visibleIndexes.first;
+    _selectedMenuTitle = _modules[_selectedModuleIndex].items.first.title;
+    _openPages
+      ..clear()
+      ..add((moduleIndex: _selectedModuleIndex, title: _selectedMenuTitle));
+  }
+
+  void _selectMenu(int moduleIndex, ErpMenuItem item) {
+    if (!widget.authorizedModules.contains(_modules[moduleIndex].title)) return;
+    setState(() {
+      _selectedModuleIndex = moduleIndex;
+      _selectedMenuTitle = item.title;
+      if (!_openPages.any(
+        (page) => page.moduleIndex == moduleIndex && page.title == item.title,
+      )) {
+        _openPages.add((moduleIndex: moduleIndex, title: item.title));
+      }
+    });
+  }
+
+  void _openDashboard() {
+    if (!widget.authorizedModules.contains('Gestion')) return;
+    setState(() {
+      _selectedModuleIndex = 0;
+      _selectedMenuTitle = 'Accueil';
+      if (!_openPages.any((page) => page.title == 'Accueil')) {
+        _openPages.insert(0, (moduleIndex: 0, title: 'Accueil'));
+      }
+    });
+  }
+
+  void _selectOpenPage(({int moduleIndex, String title}) page) {
+    setState(() {
+      _selectedModuleIndex = page.moduleIndex;
+      _selectedMenuTitle = page.title;
+    });
+  }
+
+  void _closeOpenPage(({int moduleIndex, String title}) page) {
+    if (page.title == 'Accueil') return;
+    setState(() {
+      final index = _openPages.indexOf(page);
+      _openPages.remove(page);
+      if (_selectedModuleIndex == page.moduleIndex &&
+          _selectedMenuTitle == page.title) {
+        final next = _openPages[(index - 1).clamp(0, _openPages.length - 1)];
+        _selectedModuleIndex = next.moduleIndex;
+        _selectedMenuTitle = next.title;
+      }
+    });
+  }
+
+  Widget _buildPageTabs() => Container(
+    height: 44,
+    color: Colors.white,
+    child: SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: _openPages.map((page) {
+          final selected =
+              page.moduleIndex == _selectedModuleIndex &&
+              page.title == _selectedMenuTitle;
+          return InkWell(
+            onTap: () => _selectOpenPage(page),
+            child: Container(
+              height: 44,
+              padding: const EdgeInsets.only(left: 14, right: 4),
+              decoration: BoxDecoration(
+                color: selected ? const Color(0xFFE8EAF6) : Colors.white,
+                border: Border(
+                  bottom: BorderSide(
+                    color: selected
+                        ? const Color(0xFF1A237E)
+                        : Colors.transparent,
+                    width: 2,
+                  ),
+                  right: const BorderSide(color: Color(0xFFE7EAF0)),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    page.title,
+                    style: TextStyle(
+                      fontWeight: selected
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                      color: const Color(0xFF344054),
+                    ),
+                  ),
+                  if (page.title != 'Accueil')
+                    IconButton(
+                      key: ValueKey(
+                        'close-page-${page.moduleIndex}-${page.title}',
+                      ),
+                      tooltip: 'Fermer ${page.title}',
+                      visualDensity: VisualDensity.compact,
+                      iconSize: 17,
+                      onPressed: () => _closeOpenPage(page),
+                      icon: const Icon(Icons.close_rounded),
+                    )
+                  else
+                    const SizedBox(width: 10),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    ),
+  );
+
+  Widget _buildPageFor(({int moduleIndex, String title}) page) {
+    final module = _modules[page.moduleIndex];
+    switch (page.title) {
+      case 'Accueil':
+        if (!widget.authorizedModules.contains('Gestion')) {
+          return const ModulePlaceholderPage(
+            title: 'Accès non autorisé',
+            icon: Icons.lock_outline_rounded,
+            moduleTitle: 'Gestion',
+          );
+        }
+        return HomePage(
+          dossiers: _dossiers,
+          clients: _clients,
+          onSelectMenu: _selectMenu,
+          availableModuleIndexes: _visibleModuleIndexes,
+        );
+      case 'Dossier':
+        return DashboardPage(
+          dossiers: _dossiers,
+          clients: _clients,
+          prestataires: _prestataires,
+          journals: _journalCodes,
+        );
+      case 'Clients':
+        return ClientsPage(clients: _clients, comptes: _planAccounts);
+      case 'Espace Prestataire':
+        return PrestatairesPage(
+          prestataires: _prestataires,
+          comptes: _planAccounts,
+        );
+      case 'Plan Comptable':
+        return PlanComptablePage(
+          comptes: _planAccounts,
+          clients: _clients,
+          prestataires: _prestataires,
+          journals: _journalCodes,
+        );
+      case 'Code journaux':
+        return JournalCodesPage(
+          journals: _journalCodes,
+          comptes: _planAccounts,
+        );
+      case 'Facture Client':
+        return DossierInvoicesPage(
+          dossiers: _dossiers,
+          kind: DossierInvoiceKind.client,
+          userDisplayName: widget.userDisplayName,
+        );
+      case 'Facture Prestataire':
+        return DossierInvoicesPage(
+          dossiers: _dossiers,
+          kind: DossierInvoiceKind.provider,
+          prestataires: _prestataires,
+          userDisplayName: widget.userDisplayName,
+        );
+      case 'Facture Transitaire':
+        return DossierInvoicesPage(
+          dossiers: _dossiers,
+          kind: DossierInvoiceKind.forwarder,
+          prestataires: _prestataires,
+          userDisplayName: widget.userDisplayName,
+        );
+      case 'Facture Transporteur':
+        return DossierInvoicesPage(
+          dossiers: _dossiers,
+          kind: DossierInvoiceKind.carrier,
+          prestataires: _prestataires,
+          userDisplayName: widget.userDisplayName,
+        );
+      case 'Voyages':
+        return VoyagesPage(dossiers: _dossiers, voyages: _voyages);
+      case 'Gestion utilisateur':
+        return UserManagementPage(
+          users: _erpUsers,
+          moduleNames: _modules.map((module) => module.title).toList(),
+          currentUserRole: widget.userRole,
+        );
+      case 'Control des Caisses':
+        return CashControlPage(dossiers: _dossiers, journals: _journalCodes);
+      case 'Règlement':
+        return SettlementHubPage(dossiers: _dossiers, journals: _journalCodes);
+      case 'Saisie des Règlements Transporteurs':
+        return SettlementEntryPage(
+          dossiers: _dossiers,
+          journals: _journalCodes,
+          kind: SettlementKind.carrier,
+        );
+      case 'Historique':
+        return HistoryPage(dossiers: _dossiers);
+      default:
+        final item = module.items.firstWhere(
+          (entry) => entry.title == page.title,
+        );
+        return ModulePlaceholderPage(
+          title: item.title,
+          icon: item.icon,
+          moduleTitle: module.title,
+        );
+    }
+  }
+
+  Widget _buildTopBar(bool isCompact) {
+    final openDossiers = _dossiers
+        .where((dossier) => dossier.statut == 'Ouvert')
+        .toList();
+    return Container(
+      height: 64,
+      color: const Color(0xFF18334F),
+      child: Row(
+        children: [
+          InkWell(
+            key: const ValueKey('dashboard-logo-button'),
+            onTap: _openDashboard,
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              width: 54,
+              height: 48,
+              margin: const EdgeInsets.only(left: 10, right: 8),
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Image.asset(
+                key: const ValueKey('header-stt-logo'),
+                'assets/logo.png',
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) => const Icon(
+                  Icons.local_shipping_rounded,
+                  color: Color(0xFF18334F),
+                ),
+              ),
+            ),
+          ),
+          if (isCompact)
+            IconButton(
+              tooltip: 'Ouvrir les modules',
+              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+              icon: const Icon(Icons.menu_rounded, color: Colors.white),
+            ),
+          if (!isCompact)
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: _visibleModuleIndexes.map((index) {
+                    final module = _modules[index];
+                    final selected = index == _selectedModuleIndex;
+                    return PopupMenuButton<ErpMenuItem>(
+                      tooltip: module.title,
+                      onSelected: (item) => _selectMenu(index, item),
+                      itemBuilder: (context) => module.items
+                          .map(
+                            (item) => PopupMenuItem<ErpMenuItem>(
+                              value: item,
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 270,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      item.icon,
+                                      size: 20,
+                                      color: const Color(0xFF1A237E),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        item.title,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              module.title,
+                              style: TextStyle(
+                                color: selected
+                                    ? Colors.white
+                                    : Colors.white.withValues(alpha: 0.88),
+                                fontWeight: selected
+                                    ? FontWeight.bold
+                                    : FontWeight.w500,
+                              ),
+                            ),
+                            const Icon(
+                              Icons.arrow_drop_down,
+                              color: Colors.white,
+                              size: 19,
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+          if (isCompact) const Spacer(),
+          IconButton(
+            tooltip: 'Alertes conteneurs',
+            onPressed: () => _showContainerAlerts(openDossiers),
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.public_rounded, color: Colors.white),
+                if (openDossiers.isNotEmpty)
+                  Positioned(
+                    right: -6,
+                    top: -5,
+                    child: _HeaderBadge(count: openDossiers.length),
+                  ),
+              ],
+            ),
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'Notifications',
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(
+                  Icons.notifications_none_rounded,
+                  color: Colors.white,
+                ),
+                if (openDossiers.isNotEmpty)
+                  Positioned(
+                    right: -5,
+                    top: -5,
+                    child: _HeaderBadge(count: openDossiers.length),
+                  ),
+              ],
+            ),
+            itemBuilder: (context) => openDossiers.isEmpty
+                ? const [
+                    PopupMenuItem<String>(
+                      enabled: false,
+                      child: Text('Aucune notification pour le moment'),
+                    ),
+                  ]
+                : openDossiers
+                      .take(5)
+                      .map(
+                        (dossier) => PopupMenuItem<String>(
+                          enabled: false,
+                          child: SizedBox(
+                            width: 260,
+                            child: Text(
+                              'Dossier ${dossier.numDossier} à suivre • ${dossier.client.nom}',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      )
+                      .toList(),
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'Profil utilisateur',
+            onSelected: (value) {
+              if (value == 'logout') {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoginPage()),
+                );
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem<String>(
+                enabled: false,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const CircleAvatar(child: Text('ST')),
+                  title: Text(widget.userDisplayName),
+                  subtitle: Text(widget.userRole),
+                ),
+              ),
+              const PopupMenuDivider(),
+              PopupMenuItem<String>(
+                value: 'logout',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.logout_rounded),
+                  title: Text('Se déconnecter'),
+                ),
+              ),
+            ],
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 6),
+              child: CircleAvatar(
+                radius: 16,
+                backgroundColor: Color(0xFF526B85),
+                child: Text(
+                  'AD',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Se déconnecter',
+            onPressed: () => Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const LoginPage()),
+            ),
+            icon: const Icon(Icons.logout_rounded, color: Colors.white),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModuleDrawer() {
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+              color: const Color(0xFF18334F),
+              child: Row(
+                children: [
+                  Container(
+                    width: 60,
+                    height: 54,
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: Image.asset('assets/logo.png', fit: BoxFit.contain),
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Text(
+                      'Modules ERP',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                itemCount: _visibleModuleIndexes.length,
+                itemBuilder: (context, visibleIndex) {
+                  final moduleIndex = _visibleModuleIndexes[visibleIndex];
+                  final module = _modules[moduleIndex];
+                  final isSelectedModule = moduleIndex == _selectedModuleIndex;
+                  return ExpansionTile(
+                    key: PageStorageKey<String>('module-${module.title}'),
+                    initiallyExpanded: isSelectedModule,
+                    leading: Icon(
+                      module.icon,
+                      color: isSelectedModule
+                          ? const Color(0xFF1A237E)
+                          : const Color(0xFF64748B),
+                    ),
+                    title: Text(
+                      module.title,
+                      style: TextStyle(
+                        fontWeight: isSelectedModule
+                            ? FontWeight.bold
+                            : FontWeight.w500,
+                      ),
+                    ),
+                    children: module.items
+                        .map(
+                          (item) => ListTile(
+                            contentPadding: const EdgeInsets.only(
+                              left: 58,
+                              right: 16,
+                            ),
+                            leading: Icon(item.icon, size: 19),
+                            title: Text(item.title),
+                            selected: _selectedMenuTitle == item.title,
+                            onTap: () {
+                              _selectMenu(moduleIndex, item);
+                              Navigator.pop(context);
+                            },
+                          ),
+                        )
+                        .toList(),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showContainerAlerts(List<TransitDossier> openDossiers) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.public_rounded, color: Color(0xFF1A237E)),
+            SizedBox(width: 10),
+            Expanded(child: Text('Suivi des conteneurs')),
+          ],
+        ),
+        content: SizedBox(
+          width: 440,
+          child: openDossiers.isEmpty
+              ? const Text('Aucun dossier ouvert à surveiller.')
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${openDossiers.fold<int>(0, (sum, dossier) => sum + dossier.nbConteneurs)} conteneur(s) dans ${openDossiers.length} dossier(s) ouvert(s).',
+                    ),
+                    const SizedBox(height: 12),
+                    ...openDossiers
+                        .take(6)
+                        .map(
+                          (dossier) => ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(
+                              Icons.local_shipping_outlined,
+                              color: Color(0xFF1A237E),
+                            ),
+                            title: Text('Dossier ${dossier.numDossier}'),
+                            subtitle: Text(
+                              '${dossier.client.nom} • ${dossier.nbConteneurs} conteneur(s)',
+                            ),
+                            trailing: const Chip(label: Text('Ouvert')),
+                          ),
+                        ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Les alertes d’arrivée nécessiteront une date d’arrivée prévue et une source de suivi.',
+                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                  ],
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fermer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 1000;
+        return Scaffold(
+          key: _scaffoldKey,
+          drawer: isCompact ? _buildModuleDrawer() : null,
+          body: Column(
+            children: [
+              _buildTopBar(isCompact),
+              if (_openPages.length > 1) _buildPageTabs(),
+              Expanded(
+                child: Container(
+                  color: const Color(0xFFF8F9FD),
+                  child: IndexedStack(
+                    index: _openPages.indexWhere(
+                      (page) =>
+                          page.moduleIndex == _selectedModuleIndex &&
+                          page.title == _selectedMenuTitle,
+                    ),
+                    children: _openPages
+                        .map(
+                          (page) => HeroMode(
+                            enabled:
+                                page.moduleIndex == _selectedModuleIndex &&
+                                page.title == _selectedMenuTitle,
+                            child: KeyedSubtree(
+                              key: ValueKey(
+                                'workspace-${page.moduleIndex}-${page.title}',
+                              ),
+                              child: _buildPageFor(page),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _HeaderBadge extends StatelessWidget {
+  final int count;
+
+  const _HeaderBadge({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 17, minHeight: 17),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      decoration: const BoxDecoration(
+        color: Color(0xFFE53935),
+        shape: BoxShape.circle,
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        count > 99 ? '99+' : '$count',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 9,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+}
+
+class UserManagementPage extends StatefulWidget {
+  final List<ErpUser> users;
+  final List<String> moduleNames;
+  final String currentUserRole;
+
+  const UserManagementPage({
+    super.key,
+    required this.users,
+    required this.moduleNames,
+    required this.currentUserRole,
+  });
+
+  @override
+  State<UserManagementPage> createState() => _UserManagementPageState();
+}
+
+class _UserManagementPageState extends State<UserManagementPage> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.currentUserRole != 'Administrateur') {
+      return const ModulePlaceholderPage(
+        title: 'Gestion utilisateur',
+        icon: Icons.lock_outline,
+        moduleTitle: 'Gestion',
+      );
+    }
+    final users = widget.users
+        .where(
+          (user) => '${user.name} ${user.login} ${user.role}'
+              .toLowerCase()
+              .contains(_query.toLowerCase()),
+        )
+        .toList();
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FD),
+      appBar: AppBar(
+        title: const Text('Gestion du Personnel'),
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1A237E),
+      ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1200),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(18),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        key: const ValueKey('user-search'),
+                        onChanged: (value) => setState(() => _query = value),
+                        decoration: const InputDecoration(
+                          hintText: 'Rechercher un membre…',
+                          prefixIcon: Icon(Icons.search),
+                          border: OutlineInputBorder(),
+                          filled: true,
+                          fillColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    FilledButton.icon(
+                      key: const ValueKey('add-user'),
+                      onPressed: () => _editUser(),
+                      icon: const Icon(Icons.person_add_alt_1),
+                      label: const Text('Nouveau membre'),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: users.isEmpty
+                    ? const Center(child: Text('Aucun utilisateur enregistré.'))
+                    : ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(18, 0, 18, 24),
+                        itemCount: users.length,
+                        itemBuilder: (context, index) {
+                          final user = users[index];
+                          return Card(
+                            child: ListTile(
+                              leading: CircleAvatar(
+                                child: Text(
+                                  user.name.isEmpty
+                                      ? '?'
+                                      : user.name[0].toUpperCase(),
+                                ),
+                              ),
+                              title: Text(
+                                user.name,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              subtitle: Text(
+                                '${user.login} • ${user.role} • ${user.accessModules.length} module(s) autorisé(s)',
+                              ),
+                              trailing: IconButton(
+                                key: ValueKey('edit-user-${user.id}'),
+                                tooltip: 'Modifier les accès',
+                                onPressed: () => _editUser(user),
+                                icon: const Icon(Icons.edit_outlined),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editUser([ErpUser? initial]) async {
+    final result = await showDialog<ErpUser>(
+      context: context,
+      builder: (context) => _ErpUserFormDialog(
+        users: widget.users,
+        moduleNames: widget.moduleNames,
+        initial: initial,
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      final index = widget.users.indexWhere((user) => user.id == result.id);
+      if (index < 0) {
+        widget.users.add(result);
+      } else {
+        widget.users[index] = result;
+      }
+    });
+  }
+}
+
+class _ErpUserFormDialog extends StatefulWidget {
+  final List<ErpUser> users;
+  final List<String> moduleNames;
+  final ErpUser? initial;
+
+  const _ErpUserFormDialog({
+    required this.users,
+    required this.moduleNames,
+    this.initial,
+  });
+
+  @override
+  State<_ErpUserFormDialog> createState() => _ErpUserFormDialogState();
+}
+
+class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _name = TextEditingController();
+  final _login = TextEditingController();
+  final _password = TextEditingController();
+  late String _role;
+  late Set<String> _access;
+
+  static const _roles = [
+    'Administrateur',
+    'Direction',
+    'Comptable',
+    'Gestionnaire',
+    'Prestataire',
+    'Transporteur',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    final user = widget.initial;
+    _role = user?.role ?? 'Gestionnaire';
+    _access = user == null
+        ? _defaultAccess(_role, widget.moduleNames)
+        : user.accessModules.toSet();
+    if (user != null) {
+      _name.text = user.name;
+      _login.text = user.login;
+      _password.text = user.password;
+    }
+  }
+
+  static Set<String> _defaultAccess(String role, List<String> modules) {
+    switch (role) {
+      case 'Administrateur':
+      case 'Direction':
+        return modules.toSet();
+      case 'Comptable':
+        return {'Comptabilité', 'Recouvrement'};
+      case 'Prestataire':
+        return {'Prestation'};
+      case 'Transporteur':
+        return {'Transport'};
+      default:
+        return {'Gestion', 'Transport'};
+    }
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _login.dispose();
+    _password.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(
+      widget.initial == null ? 'Nouveau membre' : 'Modifier le membre',
+    ),
+    content: SizedBox(
+      width: 540,
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _requiredField(_name, 'Nom complet'),
+              _requiredField(_login, 'Identifiant'),
+              TextFormField(
+                key: const ValueKey('user-password'),
+                controller: _password,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Mot de passe',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) => value == null || value.isEmpty
+                    ? 'Saisissez un mot de passe'
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                key: const ValueKey('user-role'),
+                initialValue: _role,
+                decoration: const InputDecoration(
+                  labelText: 'Rôle',
+                  border: OutlineInputBorder(),
+                ),
+                items: _roles
+                    .map(
+                      (role) =>
+                          DropdownMenuItem(value: role, child: Text(role)),
+                    )
+                    .toList(),
+                onChanged: (role) {
+                  if (role == null) return;
+                  setState(() {
+                    _role = role;
+                    _access = _defaultAccess(role, widget.moduleNames);
+                  });
+                },
+              ),
+              const SizedBox(height: 18),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'DROITS D’ACCÈS AUX MODULES',
+                  style: TextStyle(
+                    color: Color(0xFF607D8B),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const Divider(),
+              ...widget.moduleNames.map(
+                (module) => CheckboxListTile(
+                  key: ValueKey('access-$module'),
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(module),
+                  value: _access.contains(module),
+                  onChanged: (allowed) => setState(() {
+                    if (allowed == true) {
+                      _access.add(module);
+                    } else {
+                      _access.remove(module);
+                    }
+                  }),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Annuler'),
+      ),
+      FilledButton(onPressed: _save, child: const Text('Enregistrer')),
+    ],
+  );
+
+  Widget _requiredField(TextEditingController controller, String label) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: TextFormField(
+          controller: controller,
+          decoration: InputDecoration(
+            labelText: label,
+            border: const OutlineInputBorder(),
+          ),
+          validator: (value) => value == null || value.trim().isEmpty
+              ? 'Ce champ est obligatoire'
+              : null,
+        ),
+      );
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    final login = _login.text.trim();
+    final duplicate = widget.users.any(
+      (user) =>
+          user.id != widget.initial?.id &&
+          _normalizeUniqueValue(user.login) == _normalizeUniqueValue(login),
+    );
+    if (duplicate) {
+      await _showDuplicateAlert(context, 'Cet identifiant utilisateur');
+      return;
+    }
+    Navigator.pop(
+      context,
+      ErpUser(
+        id:
+            widget.initial?.id ??
+            DateTime.now().microsecondsSinceEpoch.toString(),
+        name: _name.text.trim(),
+        login: login,
+        password: _password.text,
+        role: _role,
+        accessModules: _access,
+      ),
+    );
+  }
+}
+
+class CashControlPage extends StatefulWidget {
+  final List<TransitDossier> dossiers;
+  final List<JournalCode> journals;
+
+  const CashControlPage({
+    super.key,
+    required this.dossiers,
+    required this.journals,
+  });
+
+  @override
+  State<CashControlPage> createState() => _CashControlPageState();
+}
+
+class _CashControlPageState extends State<CashControlPage> {
+  JournalCode? _journal;
+  DateTime _start = DateTime(DateTime.now().year, 1, 1);
+  DateTime _end = DateTime(DateTime.now().year, 12, 31);
+
+  List<(TransitDossier, DossierOperation)> get _movements {
+    final result = <(TransitDossier, DossierOperation)>[];
+    for (final dossier in widget.dossiers) {
+      for (final operation in dossier.operations) {
+        if (!_isCashMovement(operation)) continue;
+        final date = _parseOperationDate(operation.date);
+        if (date == null ||
+            date.isBefore(DateTime(_start.year, _start.month, _start.day)) ||
+            date.isAfter(
+              DateTime(_end.year, _end.month, _end.day, 23, 59, 59),
+            )) {
+          continue;
+        }
+        if (_journal != null && operation.codeJournal != _journal!.code) {
+          continue;
+        }
+        result.add((dossier, operation));
+      }
+    }
+    result.sort((left, right) {
+      final leftDate = _parseOperationDate(left.$2.date)!;
+      final rightDate = _parseOperationDate(right.$2.date)!;
+      return leftDate.compareTo(rightDate);
+    });
+    return result;
+  }
+
+  bool _isCashMovement(DossierOperation operation) =>
+      operation.type == DossierOperationType.clientPayment ||
+      operation.type == DossierOperationType.providerAdvance ||
+      operation.type == DossierOperationType.providerPayment ||
+      operation.type == DossierOperationType.expense;
+
+  DateTime? _parseOperationDate(String value) {
+    final match = RegExp(
+      r'^(\d{2})/(\d{2})/(\d{4})(?:\s+(\d{2}):(\d{2}))?$',
+    ).firstMatch(value);
+    if (match == null) return null;
+    final day = int.tryParse(match.group(1)!);
+    final month = int.tryParse(match.group(2)!);
+    final year = int.tryParse(match.group(3)!);
+    final hour = int.tryParse(match.group(4) ?? '0');
+    final minute = int.tryParse(match.group(5) ?? '0');
+    if (day == null ||
+        month == null ||
+        year == null ||
+        hour == null ||
+        minute == null) {
+      return null;
+    }
+    final date = DateTime(year, month, day, hour, minute);
+    if (date.year != year || date.month != month || date.day != day) {
+      return null;
+    }
+    return date;
+  }
+
+  double _signedAmount(DossierOperation operation) =>
+      operation.type == DossierOperationType.clientPayment ||
+          operation.type == DossierOperationType.providerAdvance
+      ? operation.montant
+      : -operation.montant;
+
+  @override
+  Widget build(BuildContext context) {
+    final movements = _movements;
+    final income = movements
+        .where((entry) => _signedAmount(entry.$2) > 0)
+        .fold<double>(0, (total, entry) => total + entry.$2.montant);
+    final outflow = movements
+        .where((entry) => _signedAmount(entry.$2) < 0)
+        .fold<double>(0, (total, entry) => total + entry.$2.montant);
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FD),
+      appBar: AppBar(
+        title: const Text('Contrôle de Caisse'),
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1A237E),
+      ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1000),
+          child: ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    children: [
+                      const Icon(
+                        Icons.account_balance_wallet_rounded,
+                        color: Colors.green,
+                        size: 54,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Rapport de Contrôle de Caisse',
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Récapitulatif des encaissements et dépenses avec solde progressif.',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 24),
+                      DropdownButtonFormField<JournalCode?>(
+                        key: const ValueKey('cash-journal-filter'),
+                        initialValue: _journal,
+                        decoration: const InputDecoration(
+                          labelText: 'Code journal',
+                          prefixIcon: Icon(Icons.menu_book_rounded),
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          const DropdownMenuItem<JournalCode?>(
+                            value: null,
+                            child: Text('Tous les journaux'),
+                          ),
+                          ...widget.journals.map(
+                            (journal) => DropdownMenuItem<JournalCode?>(
+                              value: journal,
+                              child: Text(
+                                '${journal.code} • ${journal.intitule}',
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged: (journal) =>
+                            setState(() => _journal = journal),
+                      ),
+                      const SizedBox(height: 16),
+                      Wrap(
+                        spacing: 14,
+                        runSpacing: 10,
+                        children: [
+                          _dateButton('Date début', _start, (date) {
+                            if (date != null) setState(() => _start = date);
+                          }),
+                          _dateButton('Date fin', _end, (date) {
+                            if (date != null) setState(() => _end = date);
+                          }),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          key: const ValueKey('generate-cash-control'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF2E7D32),
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                          onPressed: _generateReport,
+                          icon: const Icon(Icons.picture_as_pdf_outlined),
+                          label: const Text('GÉNÉRER LE CONTRÔLE DE CAISSE'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  _cashMetric('Encaissements', income, Colors.green),
+                  _cashMetric('Décaissements', outflow, Colors.redAccent),
+                  _cashMetric('Solde période', income - outflow, Colors.indigo),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (movements.isEmpty)
+                const Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Text(
+                      'Aucun mouvement de caisse pour cette période et ce journal.',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                )
+              else
+                ...movements.map(
+                  (entry) => Card(
+                    child: ListTile(
+                      leading: Icon(
+                        _signedAmount(entry.$2) >= 0
+                            ? Icons.south_west_rounded
+                            : Icons.north_east_rounded,
+                        color: _signedAmount(entry.$2) >= 0
+                            ? Colors.green
+                            : Colors.redAccent,
+                      ),
+                      title: Text(entry.$2.titre),
+                      subtitle: Text(
+                        '${entry.$1.numDossier} • ${entry.$1.client.nom} • ${entry.$2.date} • ${entry.$2.codeJournal.isEmpty ? 'Sans journal' : entry.$2.codeJournal}',
+                      ),
+                      trailing: Text(
+                        '${_signedAmount(entry.$2) < 0 ? '-' : '+'}${formatCurrency(entry.$2.montant)} FCFA',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _dateButton(
+    String label,
+    DateTime current,
+    ValueChanged<DateTime?> onPicked,
+  ) => OutlinedButton.icon(
+    onPressed: () async {
+      final picked = await showDatePicker(
+        context: context,
+        initialDate: current,
+        firstDate: DateTime(2000),
+        lastDate: DateTime(2100),
+      );
+      onPicked(picked);
+    },
+    icon: const Icon(Icons.calendar_month_outlined),
+    label: Text('$label : ${DateFormat('dd/MM/yyyy').format(current)}'),
+  );
+
+  Widget _cashMetric(String label, double amount, Color color) => SizedBox(
+    width: 260,
+    child: Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: TextStyle(color: color)),
+            const SizedBox(height: 6),
+            Text(
+              '${formatCurrency(amount)} FCFA',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  Future<void> _generateReport() async {
+    if (_end.isBefore(_start)) {
+      await _showInfoAlert(
+        context,
+        title: 'Période invalide',
+        message:
+            'La date de fin doit être égale ou postérieure à la date de début.',
+      );
+      return;
+    }
+    final movements = _movements;
+    var balance = 0.0;
+    final data = movements.map((entry) {
+      final amount = _signedAmount(entry.$2);
+      balance += amount;
+      return [
+        entry.$2.date,
+        entry.$2.codeJournal.isEmpty ? '—' : entry.$2.codeJournal,
+        entry.$1.numDossier,
+        entry.$2.titre,
+        amount >= 0
+            ? formatCurrency(amount)
+            : '-${formatCurrency(amount.abs())}',
+        formatCurrency(balance),
+      ];
+    }).toList();
+    final pdf = pw.Document();
+    pdf.addPage(
+      pw.MultiPage(
+        build: (_) => [
+          pw.Text(
+            'RAPPORT DE CONTRÔLE DE CAISSE',
+            style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 8),
+          pw.Text(
+            'Journal : ${_journal == null ? 'Tous les journaux' : '${_journal!.code} — ${_journal!.intitule}'}',
+          ),
+          pw.Text(
+            'Période : ${DateFormat('dd/MM/yyyy').format(_start)} au ${DateFormat('dd/MM/yyyy').format(_end)}',
+          ),
+          pw.SizedBox(height: 16),
+          pw.TableHelper.fromTextArray(
+            headers: [
+              'Date',
+              'Journal',
+              'Dossier',
+              'Opération',
+              'Entrée / sortie',
+              'Solde progressif',
+            ],
+            data: data,
+          ),
+          pw.SizedBox(height: 14),
+          pw.Text('Solde de la période : ${formatCurrency(balance)} FCFA'),
+        ],
+      ),
+    );
+    await Printing.layoutPdf(onLayout: (_) async => pdf.save());
+  }
+}
+
+class SettlementHubPage extends StatelessWidget {
+  final List<TransitDossier> dossiers;
+  final List<JournalCode> journals;
+
+  const SettlementHubPage({
+    super.key,
+    required this.dossiers,
+    required this.journals,
+  });
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: const Color(0xFFF8F9FD),
+    appBar: AppBar(
+      title: const Text('Gestion des règlements'),
+      backgroundColor: Colors.white,
+      foregroundColor: const Color(0xFF1A237E),
+    ),
+    body: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: ListView(
+          padding: const EdgeInsets.all(24),
+          shrinkWrap: true,
+          children: [
+            _settlementOption(
+              context,
+              title: 'Saisie des Règlements Clients',
+              icon: Icons.person_add_alt_1_rounded,
+              kind: SettlementKind.client,
+            ),
+            _settlementOption(
+              context,
+              title: 'Saisie des Règlements Fournisseurs',
+              icon: Icons.business_center_rounded,
+              kind: SettlementKind.supplier,
+            ),
+            _settlementOption(
+              context,
+              title: 'Saisie des Règlements Transitaires',
+              icon: Icons.directions_boat_rounded,
+              kind: SettlementKind.forwarder,
+            ),
+            _settlementOption(
+              context,
+              title: 'Saisie des Règlements Transporteurs',
+              icon: Icons.local_shipping_rounded,
+              kind: SettlementKind.carrier,
+              key: const ValueKey('settlement-carriers'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  Widget _settlementOption(
+    BuildContext context, {
+    required String title,
+    required IconData icon,
+    required SettlementKind kind,
+    Key? key,
+  }) => Card(
+    key: key,
+    margin: const EdgeInsets.only(bottom: 14),
+    elevation: 2,
+    child: ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+      leading: CircleAvatar(
+        radius: 25,
+        backgroundColor: const Color(0xFFE9EEF5),
+        child: Icon(icon, color: const Color(0xFF455A64)),
+      ),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SettlementEntryPage(
+            dossiers: dossiers,
+            journals: journals,
+            kind: kind,
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class SettlementEntryPage extends StatefulWidget {
+  final List<TransitDossier> dossiers;
+  final List<JournalCode> journals;
+  final SettlementKind kind;
+
+  const SettlementEntryPage({
+    super.key,
+    required this.dossiers,
+    required this.journals,
+    required this.kind,
+  });
+
+  @override
+  State<SettlementEntryPage> createState() => _SettlementEntryPageState();
+}
+
+class _SettlementEntryPageState extends State<SettlementEntryPage> {
+  final _piece = TextEditingController();
+  final _label = TextEditingController();
+  final _amount = TextEditingController();
+  TransitDossier? _dossier;
+  JournalCode? _journal;
+  String _paymentMethod = 'Caisse';
+  DateTime _date = DateTime.now();
+
+  bool get _isClient => widget.kind == SettlementKind.client;
+  String get _title => switch (widget.kind) {
+    SettlementKind.client => 'Saisie des règlements clients',
+    SettlementKind.supplier => 'Saisie des règlements fournisseurs',
+    SettlementKind.forwarder => 'Saisie des règlements transitaires',
+    SettlementKind.carrier => 'Saisie des règlements transporteurs',
+  };
+
+  List<TransitDossier> get _eligibleDossiers =>
+      widget.dossiers.where((dossier) {
+        if (_isClient) return true;
+        final provider = dossier.prestataire;
+        if (widget.kind == SettlementKind.supplier) return provider != null;
+        if (widget.kind == SettlementKind.forwarder) {
+          return dossier.transitaireAffecte != null ||
+              provider?.type == 'Transitaire';
+        }
+        return dossier.transporteurAffecte != null ||
+            provider?.type == 'Transporteur';
+      }).toList();
+
+  DossierOperationType get _operationType => _isClient
+      ? DossierOperationType.clientPayment
+      : DossierOperationType.providerPayment;
+
+  String get _category => switch (widget.kind) {
+    SettlementKind.client => 'Règlement Client',
+    SettlementKind.supplier => 'Règlement Fournisseur',
+    SettlementKind.forwarder => 'Règlement Transitaire',
+    SettlementKind.carrier => 'Règlement Transporteur',
+  };
+
+  @override
+  void dispose() {
+    _piece.dispose();
+    _label.dispose();
+    _amount.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dossiers = _eligibleDossiers;
+    final title = _title;
+    final operations = <(TransitDossier, DossierOperation)>[];
+    for (final dossier in dossiers) {
+      if (_dossier == null || _dossier!.id != dossier.id) continue;
+      for (final operation in dossier.operations) {
+        if ((_isClient &&
+                operation.type == DossierOperationType.clientPayment) ||
+            (!_isClient &&
+                operation.type == DossierOperationType.providerPayment &&
+                operation.categorie == _category)) {
+          operations.add((dossier, operation));
+        }
+      }
+    }
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 18),
+        ),
+        backgroundColor: const Color(0xFF424247),
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            tooltip: 'Imprimer les règlements',
+            onPressed: _printReport,
+            icon: const Icon(Icons.print_outlined),
+          ),
+        ],
+      ),
+      body: dossiers.isEmpty
+          ? Center(
+              child: Text(
+                _isClient
+                    ? 'Aucun dossier client à régler.'
+                    : 'Aucun dossier affecté à un partenaire de ce type.',
+              ),
+            )
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Compte ${_isClient ? 'client' : 'fournisseur'}',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      SearchableDropdownFormField<TransitDossier>(
+                        key: const ValueKey('settlement-account-picker'),
+                        options: dossiers,
+                        value: _dossier,
+                        label: 'Rechercher un client ou fournisseur…',
+                        emptyText: 'Aucun tiers disponible',
+                        displayString: (dossier) => _isClient
+                            ? '${dossier.client.nom} • Dossier ${dossier.numDossier} • ${dossier.client.compteComptable}'
+                            : '${_partnerName(dossier)} • Dossier ${dossier.numDossier}',
+                        onChanged: (dossier) =>
+                            setState(() => _dossier = dossier),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<JournalCode>(
+                        key: const ValueKey('settlement-journal'),
+                        isExpanded: true,
+                        initialValue: _journal,
+                        decoration: const InputDecoration(
+                          labelText: 'Journal',
+                          border: OutlineInputBorder(),
+                        ),
+                        hint: const Text('Choisir un journal'),
+                        items: widget.journals
+                            .map(
+                              (journal) => DropdownMenuItem(
+                                value: journal,
+                                child: Text(
+                                  '${journal.code} • ${journal.intitule}',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (journal) =>
+                            setState(() => _journal = journal),
+                      ),
+                      const SizedBox(height: 14),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          OutlinedButton(
+                            onPressed: _pickDate,
+                            child: Text(DateFormat('ddMMyy').format(_date)),
+                          ),
+                          SizedBox(
+                            width: 160,
+                            child: TextField(
+                              key: const ValueKey('settlement-piece'),
+                              controller: _piece,
+                              decoration: const InputDecoration(
+                                hintText: 'N° Pièce',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 260,
+                            child: TextField(
+                              key: const ValueKey('settlement-label'),
+                              controller: _label,
+                              decoration: const InputDecoration(
+                                hintText: 'Libellé',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 170,
+                            child: DropdownButtonFormField<String>(
+                              isExpanded: true,
+                              initialValue: _paymentMethod,
+                              decoration: const InputDecoration(
+                                labelText: 'Mode de règlement',
+                                border: OutlineInputBorder(),
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'Caisse',
+                                  child: Text('Caisse'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'Banque',
+                                  child: Text('Banque'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'Virement',
+                                  child: Text('Virement'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'Chèque',
+                                  child: Text('Chèque'),
+                                ),
+                              ],
+                              onChanged: (value) {
+                                if (value != null) {
+                                  setState(() => _paymentMethod = value);
+                                }
+                              },
+                            ),
+                          ),
+                          SizedBox(
+                            width: 150,
+                            child: TextField(
+                              key: const ValueKey('settlement-amount'),
+                              controller: _amount,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: const InputDecoration(
+                                hintText: 'Montant',
+                                suffixText: 'FCFA',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          FilledButton(
+                            key: const ValueKey('save-settlement'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF2E8B57),
+                            ),
+                            onPressed: _register,
+                            child: const Text('ENREGISTRER'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                if (_dossier != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '${_isClient ? 'Solde client dû' : 'Solde fournisseur dû'} : ${formatCurrency(_isClient ? _dossier!.soldeClient : _dossier!.soldePrestataire)} FCFA',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                Expanded(
+                  child: operations.isEmpty
+                      ? const Center(
+                          child: Text(
+                            'Veuillez sélectionner un compte tiers pour afficher les règlements.',
+                          ),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: operations.length,
+                          itemBuilder: (context, index) {
+                            final (dossier, operation) = operations[index];
+                            return Card(
+                              child: ListTile(
+                                leading: const Icon(
+                                  Icons.payments_outlined,
+                                  color: Color(0xFF2E8B57),
+                                ),
+                                title: Text(
+                                  '${operation.titre} • ${formatCurrency(operation.montant)} FCFA',
+                                ),
+                                subtitle: Text(
+                                  '${_partnerName(dossier)} • ${dossier.numDossier} • ${operation.date} • ${operation.codeJournal}',
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+    );
+  }
+
+  String _partnerName(TransitDossier dossier) => switch (widget.kind) {
+    SettlementKind.client => dossier.client.nom,
+    SettlementKind.forwarder =>
+      dossier.transitaireAffecte?.entreprise ??
+          dossier.prestataire?.entreprise ??
+          'Transitaire',
+    SettlementKind.carrier =>
+      dossier.transporteurAffecte?.entreprise ??
+          dossier.prestataire?.entreprise ??
+          'Transporteur',
+    SettlementKind.supplier => dossier.prestataire?.entreprise ?? 'Fournisseur',
+  };
+
+  Future<void> _pickDate() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (date != null && mounted) setState(() => _date = date);
+  }
+
+  void _register() {
+    final dossier = _dossier;
+    final journal = _journal;
+    final amount = double.tryParse(
+      _amount.text.trim().replaceAll(' ', '').replaceAll(',', '.'),
+    );
+    if (dossier == null || journal == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Sélectionnez un tiers et un code journal.'),
+        ),
+      );
+      return;
+    }
+    if (_piece.text.trim().isEmpty ||
+        _label.text.trim().isEmpty ||
+        amount == null ||
+        amount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Saisissez le numéro de pièce, le libellé et un montant valide.',
+          ),
+        ),
+      );
+      return;
+    }
+    final operation = DossierOperation(
+      type: _operationType,
+      titre: '${_piece.text.trim()} • ${_label.text.trim()} • $_paymentMethod',
+      categorie: _category,
+      montant: amount,
+      date: DateFormat('dd/MM/yyyy HH:mm').format(_date),
+      codeJournal: journal.code,
+    );
+    setState(() {
+      dossier.operations.add(operation);
+      _piece.clear();
+      _label.clear();
+      _amount.clear();
+    });
+  }
+
+  Future<void> _printReport() async {
+    final operations = <(TransitDossier, DossierOperation)>[];
+    for (final dossier in _eligibleDossiers) {
+      if (_dossier == null || _dossier!.id != dossier.id) continue;
+      for (final operation in dossier.operations) {
+        if ((_isClient &&
+                operation.type == DossierOperationType.clientPayment) ||
+            (!_isClient &&
+                operation.type == DossierOperationType.providerPayment &&
+                operation.categorie == _category)) {
+          operations.add((dossier, operation));
+        }
+      }
+    }
+    final pdf = pw.Document();
+    pdf.addPage(
+      pw.MultiPage(
+        build: (_) => [
+          pw.Text(
+            _title.toUpperCase(),
+            style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 14),
+          pw.TableHelper.fromTextArray(
+            headers: [
+              'Tiers',
+              'Dossier',
+              'N° pièce / libellé',
+              'Journal',
+              'Date',
+              'Montant',
+            ],
+            data: operations
+                .map(
+                  (entry) => [
+                    _partnerName(entry.$1),
+                    entry.$1.numDossier,
+                    entry.$2.titre,
+                    entry.$2.codeJournal,
+                    entry.$2.date,
+                    '${formatCurrency(entry.$2.montant)} FCFA',
+                  ],
+                )
+                .toList(),
+          ),
+        ],
+      ),
+    );
+    await Printing.layoutPdf(onLayout: (_) async => pdf.save());
+  }
+}
+
+class VoyagesPage extends StatefulWidget {
+  final List<TransitDossier> dossiers;
+  final List<Voyage> voyages;
+
+  const VoyagesPage({super.key, required this.dossiers, required this.voyages});
+
+  @override
+  State<VoyagesPage> createState() => _VoyagesPageState();
+}
+
+class _VoyagesPageState extends State<VoyagesPage> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final voyages = widget.voyages.where((voyage) {
+      final dossier = widget.dossiers.firstWhere(
+        (entry) => entry.id == voyage.dossierId,
+      );
+      return '${dossier.numDossier} ${voyage.plaque} ${voyage.chauffeur} ${voyage.origine} ${voyage.destination} ${voyage.statut}'
+          .toLowerCase()
+          .contains(_query.toLowerCase());
+    }).toList();
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FD),
+      appBar: AppBar(
+        title: const Text('Voyages'),
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1A237E),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(72),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: TextField(
+              onChanged: (value) => setState(() => _query = value),
+              decoration: const InputDecoration(
+                hintText: 'Rechercher un voyage, dossier ou véhicule…',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+        ),
+      ),
+      body: voyages.isEmpty
+          ? const Center(child: Text('Aucun voyage enregistré.'))
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: voyages.length,
+              itemBuilder: (context, index) {
+                final voyage = voyages[index];
+                final dossier = widget.dossiers.firstWhere(
+                  (entry) => entry.id == voyage.dossierId,
+                );
+                return Card(
+                  child: ListTile(
+                    leading: const CircleAvatar(
+                      child: Icon(Icons.local_shipping_rounded),
+                    ),
+                    title: Text(
+                      '${dossier.numDossier} • ${voyage.plaque}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Text(
+                      '${voyage.origine} → ${voyage.destination}\n${voyage.chauffeur} • Départ ${voyage.depart} • Arrivée prévue ${voyage.arriveePrevue} • ${voyage.statut}',
+                    ),
+                    isThreeLine: true,
+                    trailing: IconButton(
+                      tooltip: 'Modifier le voyage',
+                      onPressed: () => _editVoyage(voyage),
+                      icon: const Icon(Icons.edit_outlined),
+                    ),
+                  ),
+                );
+              },
+            ),
+      floatingActionButton: FloatingActionButton.extended(
+        key: const ValueKey('add-voyage'),
+        heroTag: 'voyage-add',
+        onPressed: () => _editVoyage(),
+        icon: const Icon(Icons.add_road_rounded),
+        label: const Text('NOUVEAU VOYAGE'),
+      ),
+    );
+  }
+
+  Future<void> _editVoyage([Voyage? initial]) async {
+    if (widget.dossiers.isEmpty) {
+      await _showInfoAlert(
+        context,
+        title: 'Dossier requis',
+        message: 'Créez d’abord un dossier avant d’enregistrer un voyage.',
+      );
+      return;
+    }
+    final voyage = await showDialog<Voyage>(
+      context: context,
+      builder: (context) =>
+          _VoyageFormDialog(dossiers: widget.dossiers, initial: initial),
+    );
+    if (voyage == null || !mounted) return;
+    setState(() {
+      final index = widget.voyages.indexWhere((entry) => entry.id == voyage.id);
+      if (index < 0) {
+        widget.voyages.add(voyage);
+      } else {
+        widget.voyages[index] = voyage;
+      }
+    });
+  }
+}
+
+class _VoyageFormDialog extends StatefulWidget {
+  final List<TransitDossier> dossiers;
+  final Voyage? initial;
+
+  const _VoyageFormDialog({required this.dossiers, this.initial});
+
+  @override
+  State<_VoyageFormDialog> createState() => _VoyageFormDialogState();
+}
+
+class _VoyageFormDialogState extends State<_VoyageFormDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _plate = TextEditingController();
+  final _driver = TextEditingController();
+  final _origin = TextEditingController();
+  final _destination = TextEditingController();
+  final _depart = TextEditingController();
+  final _arrival = TextEditingController();
+  late TransitDossier _dossier;
+  String _status = 'Planifié';
+
+  @override
+  void initState() {
+    super.initState();
+    _dossier = widget.dossiers.firstWhere(
+      (item) => item.id == widget.initial?.dossierId,
+      orElse: () => widget.dossiers.first,
+    );
+    final voyage = widget.initial;
+    if (voyage == null) {
+      _origin.text = _dossier.lieuMarchandise;
+      _destination.text = _dossier.lieuLivraison;
+      _depart.text = DateFormat('dd/MM/yyyy').format(DateTime.now());
+      _arrival.text = _dossier.dateArriveeBateau;
+      return;
+    }
+    _plate.text = voyage.plaque;
+    _driver.text = voyage.chauffeur;
+    _origin.text = voyage.origine;
+    _destination.text = voyage.destination;
+    _depart.text = voyage.depart;
+    _arrival.text = voyage.arriveePrevue;
+    _status = voyage.statut;
+  }
+
+  @override
+  void dispose() {
+    _plate.dispose();
+    _driver.dispose();
+    _origin.dispose();
+    _destination.dispose();
+    _depart.dispose();
+    _arrival.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(
+      widget.initial == null ? 'Nouveau voyage' : 'Modifier le voyage',
+    ),
+    content: SizedBox(
+      width: 520,
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<TransitDossier>(
+                initialValue: _dossier,
+                decoration: const InputDecoration(
+                  labelText: 'Dossier',
+                  border: OutlineInputBorder(),
+                ),
+                items: widget.dossiers
+                    .map(
+                      (dossier) => DropdownMenuItem(
+                        value: dossier,
+                        child: Text(
+                          '${dossier.numDossier} • ${dossier.client.nom}',
+                        ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null) setState(() => _dossier = value);
+                },
+              ),
+              const SizedBox(height: 10),
+              _field(_plate, 'Plaque du véhicule'),
+              _field(_driver, 'Nom du chauffeur'),
+              _field(_origin, 'Lieu de départ'),
+              _field(_destination, 'Destination'),
+              _field(_depart, 'Date de départ'),
+              _field(_arrival, 'Date d’arrivée prévue'),
+              DropdownButtonFormField<String>(
+                initialValue: _status,
+                decoration: const InputDecoration(
+                  labelText: 'Statut du voyage',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'Planifié', child: Text('Planifié')),
+                  DropdownMenuItem(value: 'En cours', child: Text('En cours')),
+                  DropdownMenuItem(value: 'Arrivé', child: Text('Arrivé')),
+                  DropdownMenuItem(value: 'Annulé', child: Text('Annulé')),
+                ],
+                onChanged: (value) {
+                  if (value != null) setState(() => _status = value);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Annuler'),
+      ),
+      FilledButton(onPressed: _save, child: const Text('Enregistrer')),
+    ],
+  );
+
+  Widget _field(TextEditingController controller, String label) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: TextFormField(
+      controller: controller,
+      decoration: InputDecoration(
+        labelText: label,
+        border: const OutlineInputBorder(),
+      ),
+      validator: (value) => value == null || value.trim().isEmpty
+          ? 'Ce champ est obligatoire'
+          : null,
+    ),
+  );
+
+  void _save() {
+    if (!_formKey.currentState!.validate()) return;
+    Navigator.pop(
+      context,
+      Voyage(
+        id:
+            widget.initial?.id ??
+            DateTime.now().microsecondsSinceEpoch.toString(),
+        dossierId: _dossier.id,
+        plaque: _plate.text.trim(),
+        chauffeur: _driver.text.trim(),
+        origine: _origin.text.trim(),
+        destination: _destination.text.trim(),
+        depart: _depart.text.trim(),
+        arriveePrevue: _arrival.text.trim(),
+        statut: _status,
+      ),
+    );
+  }
+}
+
+class ModulePlaceholderPage extends StatelessWidget {
+  final String title;
+  final String moduleTitle;
+  final IconData icon;
+
+  const ModulePlaceholderPage({
+    super.key,
+    required this.title,
+    required this.icon,
+    required this.moduleTitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FD),
+      appBar: AppBar(
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1A237E),
+        elevation: 0,
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(36),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircleAvatar(
+                      radius: 36,
+                      backgroundColor: const Color(0xFFE8EAF6),
+                      child: Icon(
+                        icon,
+                        size: 36,
+                        color: const Color(0xFF1A237E),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      title,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1A237E),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Module $moduleTitle',
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                    const SizedBox(height: 18),
+                    const Text(
+                      'Cet espace est prêt à recevoir ses fonctionnalités métier.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 15, height: 1.5),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// --- TABLEAU DE BORD ---
+
+class HomePage extends StatelessWidget {
+  final List<TransitDossier> dossiers;
+  final List<Client> clients;
+  final void Function(int moduleIndex, ErpMenuItem item) onSelectMenu;
+  final List<int> availableModuleIndexes;
+
+  const HomePage({
+    super.key,
+    required this.dossiers,
+    required this.clients,
+    required this.onSelectMenu,
+    required this.availableModuleIndexes,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final totalExpenses = dossiers.fold<double>(
+      0,
+      (sum, dossier) => sum + dossier.totalDepenses,
+    );
+    final openDossiers = dossiers
+        .where((dossier) => dossier.statut == 'Ouvert')
+        .length;
+    final totalContainers = dossiers.fold<int>(
+      0,
+      (sum, dossier) => sum + dossier.nbConteneurs,
+    );
+    final expensesByCategory = <String, double>{};
+    for (final dossier in dossiers) {
+      for (final expense in dossier.depenses) {
+        expensesByCategory.update(
+          expense.categorie,
+          (amount) => amount + expense.montant,
+          ifAbsent: () => expense.montant,
+        );
+      }
+    }
+    final expenseCategories = expensesByCategory.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 700;
+        final horizontalPadding = compact ? 16.0 : 28.0;
+        final contentWidth = constraints.maxWidth - horizontalPadding * 2;
+        final metricWidth = compact ? contentWidth : (contentWidth - 36) / 4;
+        final panelWidth = compact ? contentWidth : (contentWidth - 16) / 2;
+        return SingleChildScrollView(
+          padding: EdgeInsets.all(horizontalPadding),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1384),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Tableau de bord',
+                              style: TextStyle(
+                                color: const Color(0xFF172B4D),
+                                fontSize: compact ? 24 : 30,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              'Vue d’ensemble de votre activité SYLLA TRANSIT',
+                              style: TextStyle(
+                                color: Colors.blueGrey.shade600,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (!compact)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.calendar_today_rounded,
+                                size: 17,
+                                color: Color(0xFF1A237E),
+                              ),
+                              const SizedBox(width: 9),
+                              Text(
+                                DateFormat('dd/MM/yyyy').format(DateTime.now()),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  Container(
+                    width: double.infinity,
+                    padding: EdgeInsets.all(compact ? 22 : 30),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF172B4D), Color(0xFF315D91)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(24),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(
+                            0xFF172B4D,
+                          ).withValues(alpha: 0.16),
+                          blurRadius: 24,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'DÉPENSES ENREGISTRÉES',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 1.2,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                '${formatCurrency(totalExpenses)} FCFA',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: compact ? 27 : 38,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'Cumul des frais saisis sur les dossiers de transit',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Container(
+                          width: 58,
+                          height: 58,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: const Icon(
+                            Icons.trending_up_rounded,
+                            color: Colors.white,
+                            size: 32,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      _DashboardMetricCard(
+                        width: metricWidth,
+                        label: 'Dossiers ouverts',
+                        value: '$openDossiers',
+                        note: 'À suivre',
+                        icon: Icons.folder_open_rounded,
+                        color: const Color(0xFF3976C5),
+                      ),
+                      _DashboardMetricCard(
+                        width: metricWidth,
+                        label: 'Conteneurs',
+                        value: '$totalContainers',
+                        note: 'Tous les dossiers',
+                        icon: Icons.inventory_2_rounded,
+                        color: const Color(0xFF8A5BC2),
+                      ),
+                      _DashboardMetricCard(
+                        width: metricWidth,
+                        label: 'Clients',
+                        value: '${clients.length}',
+                        note: 'Portefeuille',
+                        icon: Icons.groups_rounded,
+                        color: const Color(0xFF24A47A),
+                      ),
+                      _DashboardMetricCard(
+                        width: metricWidth,
+                        label: 'Dossiers gérés',
+                        value: '${dossiers.length}',
+                        note: 'Total enregistré',
+                        icon: Icons.assignment_rounded,
+                        color: const Color(0xFFE59A32),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 26),
+                  const Text(
+                    'Activité opérationnelle',
+                    style: TextStyle(
+                      color: Color(0xFF172B4D),
+                      fontSize: 19,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 16,
+                    runSpacing: 16,
+                    children: [
+                      SizedBox(
+                        width: panelWidth,
+                        child: _DashboardPanel(
+                          title: 'Dépenses par catégorie',
+                          subtitle: 'Répartition des frais saisis',
+                          child: expenseCategories.isEmpty
+                              ? const _DashboardEmpty(
+                                  message:
+                                      'Les catégories apparaîtront après la saisie des premiers frais.',
+                                )
+                              : Column(
+                                  children: expenseCategories.take(5).map((
+                                    entry,
+                                  ) {
+                                    final fraction = totalExpenses == 0
+                                        ? 0.0
+                                        : entry.value / totalExpenses;
+                                    return Padding(
+                                      padding: const EdgeInsets.only(
+                                        bottom: 14,
+                                      ),
+                                      child: Column(
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: Text(
+                                                  entry.key,
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              ),
+                                              Text(
+                                                '${formatCurrency(entry.value)} F',
+                                                style: const TextStyle(
+                                                  color: Color(0xFF526174),
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 7),
+                                          ClipRRect(
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                            child: LinearProgressIndicator(
+                                              value: fraction.clamp(0.0, 1.0),
+                                              minHeight: 8,
+                                              backgroundColor: const Color(
+                                                0xFFE9EEF5,
+                                              ),
+                                              color: const Color(0xFF3976C5),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
+                                ),
+                        ),
+                      ),
+                      SizedBox(
+                        width: panelWidth,
+                        child: _DashboardPanel(
+                          title: 'Dossiers récents',
+                          subtitle: 'Derniers dossiers enregistrés',
+                          child: dossiers.isEmpty
+                              ? const _DashboardEmpty(
+                                  message:
+                                      'Aucun dossier pour le moment. Les nouveaux dossiers apparaîtront ici.',
+                                )
+                              : Column(
+                                  children: dossiers.reversed
+                                      .take(4)
+                                      .map(
+                                        (dossier) => ListTile(
+                                          contentPadding: EdgeInsets.zero,
+                                          leading: const CircleAvatar(
+                                            backgroundColor: Color(0xFFEAF1FA),
+                                            child: Icon(
+                                              Icons.local_shipping_rounded,
+                                              color: Color(0xFF1A237E),
+                                              size: 20,
+                                            ),
+                                          ),
+                                          title: Text(
+                                            'Dossier ${dossier.numDossier}',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          subtitle: Text(
+                                            '${dossier.client.nom} • ${dossier.nbConteneurs} conteneur(s)',
+                                          ),
+                                          trailing: Text(
+                                            '${formatCurrency(dossier.totalDepenses)} F',
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 26),
+                  const Text(
+                    'Modules de gestion',
+                    style: TextStyle(
+                      color: Color(0xFF172B4D),
+                      fontSize: 19,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 16,
+                    runSpacing: 16,
+                    children: availableModuleIndexes.map((moduleIndex) {
+                      final module =
+                          _MainNavigationPageState._modules[moduleIndex];
+                      return SizedBox(
+                        width: panelWidth,
+                        child: _DashboardPanel(
+                          title: module.title,
+                          subtitle:
+                              '${module.items.length} rubrique(s) disponible(s)',
+                          leading: Icon(
+                            module.icon,
+                            color: const Color(0xFF1A237E),
+                          ),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            children: module.items
+                                .map(
+                                  (item) => ActionChip(
+                                    avatar: Icon(item.icon, size: 16),
+                                    label: Text(item.title),
+                                    onPressed: () =>
+                                        onSelectMenu(moduleIndex, item),
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _DashboardMetricCard extends StatelessWidget {
+  final double width;
+  final String label;
+  final String value;
+  final String note;
+  final IconData icon;
+  final Color color;
+
+  const _DashboardMetricCard({
+    required this.width,
+    required this.label,
+    required this.value,
+    required this.note,
+    required this.icon,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      padding: const EdgeInsets.all(17),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE9EEF5)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF69788C),
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: Color(0xFF172B4D),
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  note,
+                  style: const TextStyle(
+                    color: Color(0xFF8290A2),
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DashboardPanel extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final Widget child;
+  final Widget? leading;
+
+  const _DashboardPanel({
+    required this.title,
+    required this.subtitle,
+    required this.child,
+    this.leading,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE9EEF5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (leading != null) ...[leading!, const SizedBox(width: 10)],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Color(0xFF172B4D),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: Color(0xFF8290A2),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 17),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _DashboardEmpty extends StatelessWidget {
+  final String message;
+
+  const _DashboardEmpty({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline_rounded, color: Color(0xFF8290A2)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: Color(0xFF69788C),
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class PlanComptablePage extends StatefulWidget {
+  final List<PlanAccount> comptes;
+  final List<Client> clients;
+  final List<Prestataire> prestataires;
+  final List<JournalCode> journals;
+
+  const PlanComptablePage({
+    super.key,
+    required this.comptes,
+    required this.clients,
+    required this.prestataires,
+    required this.journals,
+  });
+
+  @override
+  State<PlanComptablePage> createState() => _PlanComptablePageState();
+}
+
+class _PlanComptablePageState extends State<PlanComptablePage> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = widget.comptes.where((account) {
+      final query = _query.trim().toLowerCase();
+      return account.code.toLowerCase().contains(query) ||
+          account.libelle.toLowerCase().contains(query) ||
+          account.nature.toLowerCase().contains(query);
+    }).toList();
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FD),
+      appBar: AppBar(
+        title: const Text(
+          'Plan Comptable',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1A237E),
+        elevation: 0,
+      ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1100),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(18),
+                child: TextField(
+                  onChanged: (value) => setState(() => _query = value),
+                  decoration: const InputDecoration(
+                    labelText: 'Rechercher par code, libellé ou nature',
+                    prefixIcon: Icon(Icons.search_rounded),
+                    border: OutlineInputBorder(),
+                    filled: true,
+                    fillColor: Colors.white,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: filtered.isEmpty
+                    ? const Center(
+                        child: Text('Aucun compte comptable enregistré.'),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(18, 0, 18, 90),
+                        itemCount: filtered.length,
+                        itemBuilder: (context, index) {
+                          final account = filtered[index];
+                          return Card(
+                            child: ListTile(
+                              leading: CircleAvatar(
+                                child: Text(
+                                  account.code.length > 3
+                                      ? account.code.substring(0, 3)
+                                      : account.code,
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                              ),
+                              title: Text(
+                                '${account.code} — ${account.libelle}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              subtitle: Text(
+                                [
+                                  'Nature : ${account.nature}',
+                                  if (account.tiersId != null)
+                                    'Compte tiers associé',
+                                  if (account.assujettiTva)
+                                    'Assujetti à la TVA',
+                                  if (account.soldeInitial != 0)
+                                    'Solde initial : ${formatCurrency(account.soldeInitial)} FCFA',
+                                ].join(' • '),
+                              ),
+                              trailing: Wrap(
+                                spacing: 0,
+                                children: [
+                                  IconButton(
+                                    key: ValueKey(
+                                      'edit-account-${account.code}',
+                                    ),
+                                    tooltip: 'Modifier le compte',
+                                    onPressed: () => _editAccount(account),
+                                    icon: const Icon(Icons.edit_outlined),
+                                  ),
+                                  IconButton(
+                                    key: ValueKey(
+                                      'delete-account-${account.code}',
+                                    ),
+                                    tooltip: 'Supprimer le compte',
+                                    onPressed: () => _deleteAccount(account),
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      color: Colors.redAccent,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'plan-account-add',
+        onPressed: () => _openAccountForm(),
+        icon: const Icon(Icons.add),
+        label: const Text('NOUVEAU COMPTE'),
+      ),
+    );
+  }
+
+  Future<void> _openAccountForm([PlanAccount? initial]) async {
+    final account = await showDialog<PlanAccount>(
+      context: context,
+      builder: (context) =>
+          _PlanAccountFormDialog(accounts: widget.comptes, initial: initial),
+    );
+    if (account == null || !mounted) return;
+    setState(() {
+      if (initial == null) {
+        widget.comptes.add(account);
+        return;
+      }
+      final index = widget.comptes.indexWhere((item) => item.id == initial.id);
+      if (index < 0) return;
+      final oldCode = widget.comptes[index].code;
+      widget.comptes[index] = account;
+      for (final client in widget.clients) {
+        if (client.compteComptable == oldCode) {
+          client.compteComptable = account.code;
+        }
+      }
+      for (final provider in widget.prestataires) {
+        if (provider.compteComptable == oldCode) {
+          provider.compteComptable = account.code;
+        }
+      }
+      for (final journal in widget.journals) {
+        if (journal.compteTresorerie == oldCode) {
+          journal.compteTresorerie = account.code;
+        }
+      }
+    });
+  }
+
+  Future<void> _editAccount(PlanAccount account) => _openAccountForm(account);
+
+  Future<void> _deleteAccount(PlanAccount account) async {
+    final journalUsesAccount = widget.journals.any(
+      (journal) => journal.compteTresorerie == account.code,
+    );
+    if (account.tiersId != null || journalUsesAccount) {
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Compte encore utilisé'),
+          content: const Text(
+            'Réaffectez d’abord ce compte au tiers ou au journal concerné avant de le supprimer.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Fermer'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Supprimer ce compte ?'),
+        content: Text('${account.code} — ${account.libelle} sera supprimé.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      setState(
+        () => widget.comptes.removeWhere((item) => item.id == account.id),
+      );
+    }
+  }
+}
+
+class _PlanAccountFormDialog extends StatefulWidget {
+  final List<PlanAccount> accounts;
+  final PlanAccount? initial;
+
+  const _PlanAccountFormDialog({required this.accounts, this.initial});
+
+  @override
+  State<_PlanAccountFormDialog> createState() => _PlanAccountFormDialogState();
+}
+
+class _PlanAccountFormDialogState extends State<_PlanAccountFormDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _code = TextEditingController();
+  final _label = TextEditingController();
+  late String _nature;
+
+  @override
+  void initState() {
+    super.initState();
+    final account = widget.initial;
+    if (account == null) {
+      _nature = 'Charge';
+    } else {
+      _code.text = account.code;
+      _label.text = account.libelle;
+      _nature = account.nature;
+    }
+  }
+
+  @override
+  void dispose() {
+    _code.dispose();
+    _label.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(
+        widget.initial == null ? 'Nouveau compte' : 'Modifier le compte',
+      ),
+      content: SizedBox(
+        width: 440,
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                key: const ValueKey('plan-account-code'),
+                controller: _code,
+                decoration: const InputDecoration(
+                  labelText: 'Code',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Le code est obligatoire';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const ValueKey('plan-account-label'),
+                controller: _label,
+                decoration: const InputDecoration(
+                  labelText: 'Libellé',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'Le libellé est obligatoire'
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                key: const ValueKey('plan-account-nature'),
+                initialValue: _nature,
+                onChanged: widget.initial?.tiersId != null
+                    ? null
+                    : (value) {
+                        if (value != null) setState(() => _nature = value);
+                      },
+                decoration: const InputDecoration(
+                  labelText: 'Nature',
+                  border: OutlineInputBorder(),
+                ),
+                items: _accountNatures
+                    .map(
+                      (nature) =>
+                          DropdownMenuItem(value: nature, child: Text(nature)),
+                    )
+                    .toList(),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Annuler'),
+        ),
+        FilledButton(
+          onPressed: _save,
+          child: Text(
+            widget.initial == null
+                ? 'Enregistrer'
+                : 'Enregistrer les modifications',
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    final code = _code.text.trim();
+    final duplicate = widget.accounts.any(
+      (account) =>
+          account.id != widget.initial?.id &&
+          _normalizeUniqueValue(account.code) == _normalizeUniqueValue(code),
+    );
+    if (duplicate) {
+      await _showDuplicateAlert(context, 'Ce code de compte comptable');
+      return;
+    }
+    Navigator.pop(
+      context,
+      PlanAccount(
+        id:
+            widget.initial?.id ??
+            DateTime.now().microsecondsSinceEpoch.toString(),
+        code: code,
+        libelle: _label.text.trim(),
+        nature: _nature,
+        tiersId: widget.initial?.tiersId,
+        soldeInitial: widget.initial?.soldeInitial ?? 0,
+        assujettiTva: widget.initial?.assujettiTva ?? false,
+      ),
+    );
+  }
+}
+
+// --- ESPACE PRESTATAIRES ---
+
+class PrestatairesPage extends StatefulWidget {
+  final List<Prestataire> prestataires;
+  final List<PlanAccount> comptes;
+
+  const PrestatairesPage({
+    super.key,
+    required this.prestataires,
+    required this.comptes,
+  });
+
+  @override
+  State<PrestatairesPage> createState() => _PrestatairesPageState();
+}
+
+class _PrestatairesPageState extends State<PrestatairesPage> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = widget.prestataires.where((prestataire) {
+      final query = _query.toLowerCase().trim();
+      return prestataire.entreprise.toLowerCase().contains(query) ||
+          prestataire.villePort.toLowerCase().contains(query) ||
+          prestataire.pays.toLowerCase().contains(query) ||
+          prestataire.type.toLowerCase().contains(query);
+    }).toList();
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FD),
+      appBar: AppBar(
+        title: const Text(
+          'Espace Prestataire',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1A237E),
+        elevation: 0,
+      ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1200),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEAF2FC),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(
+                            Icons.business_center_rounded,
+                            color: Color(0xFF1A237E),
+                            size: 30,
+                          ),
+                          SizedBox(width: 14),
+                          Expanded(
+                            child: Text(
+                              'Répertoire de vos transporteurs, transitaires et partenaires locaux. Le portail prestataire pourra être activé lorsque les comptes utilisateurs et la base de données seront en place.',
+                              style: TextStyle(height: 1.4),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      onChanged: (value) => setState(() => _query = value),
+                      decoration: InputDecoration(
+                        hintText:
+                            'Rechercher une société, une ville ou un pays...',
+                        prefixIcon: const Icon(Icons.search),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      '${widget.prestataires.length} prestataire(s) enregistré(s)',
+                      style: const TextStyle(
+                        color: Color(0xFF64748B),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: filtered.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.domain_add_rounded,
+                                size: 54,
+                                color: Color(0xFF9AA8B8),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                widget.prestataires.isEmpty
+                                    ? 'Aucun prestataire enregistré'
+                                    : 'Aucun résultat pour « $_query »',
+                                style: const TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              const Text(
+                                'Ajoutez une société de transport, un transitaire ou un partenaire local.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Color(0xFF64748B)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 96),
+                        itemCount: filtered.length,
+                        itemBuilder: (context, index) {
+                          final prestataire = filtered[index];
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            elevation: 0,
+                            color: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              side: const BorderSide(color: Color(0xFFE8EDF4)),
+                            ),
+                            child: ListTile(
+                              contentPadding: const EdgeInsets.all(16),
+                              leading: const CircleAvatar(
+                                backgroundColor: Color(0xFFEAF1FA),
+                                child: Icon(
+                                  Icons.business_rounded,
+                                  color: Color(0xFF1A237E),
+                                ),
+                              ),
+                              title: Text(
+                                prestataire.entreprise,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              subtitle: Padding(
+                                padding: const EdgeInsets.only(top: 7),
+                                child: Text(
+                                  '${prestataire.type} • ${prestataire.villePort}, ${prestataire.pays}\n'
+                                  '${prestataire.contact} • ${prestataire.telephone}\n'
+                                  '${prestataire.services}\n'
+                                  'Compte fournisseur : ${prestataire.compteComptable}',
+                                  style: const TextStyle(height: 1.5),
+                                ),
+                              ),
+                              isThreeLine: true,
+                              trailing: Wrap(
+                                spacing: 0,
+                                children: [
+                                  IconButton(
+                                    key: ValueKey(
+                                      'edit-provider-${prestataire.id}',
+                                    ),
+                                    tooltip: 'Modifier le prestataire',
+                                    onPressed: () =>
+                                        _openProviderForm(prestataire),
+                                    icon: const Icon(Icons.edit_outlined),
+                                  ),
+                                  const Tooltip(
+                                    message: 'Portail à activer',
+                                    child: Icon(
+                                      Icons.lock_outline_rounded,
+                                      color: Color(0xFF8492A6),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'provider-add',
+        backgroundColor: const Color(0xFF1A237E),
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add_business_rounded),
+        label: const Text('NOUVEAU PRESTATAIRE'),
+        onPressed: () => _openProviderForm(),
+      ),
+    );
+  }
+
+  Future<void> _openProviderForm([Prestataire? initial]) async {
+    final prestataire = await showDialog<Prestataire>(
+      context: context,
+      builder: (context) => _PrestataireFormDialog(
+        prestataires: widget.prestataires,
+        comptes: widget.comptes,
+        initial: initial,
+      ),
+    );
+    if (prestataire != null && mounted) {
+      setState(() {
+        final index = widget.prestataires.indexWhere(
+          (item) => item.id == prestataire.id,
+        );
+        if (index < 0) {
+          widget.prestataires.add(prestataire);
+        } else {
+          widget.prestataires[index] = prestataire;
+        }
+      });
+    }
+  }
+}
+
+class _PrestataireFormDialog extends StatefulWidget {
+  final List<Prestataire> prestataires;
+  final List<PlanAccount> comptes;
+  final Prestataire? initial;
+
+  const _PrestataireFormDialog({
+    required this.prestataires,
+    required this.comptes,
+    this.initial,
+  });
+
+  @override
+  State<_PrestataireFormDialog> createState() => _PrestataireFormDialogState();
+}
+
+class _PrestataireFormDialogState extends State<_PrestataireFormDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _entreprise = TextEditingController();
+  final _pays = TextEditingController(text: 'Mali');
+  final _villePort = TextEditingController(text: 'Bamako');
+  final _contact = TextEditingController();
+  final _telephone = TextEditingController();
+  final _email = TextEditingController();
+  final _services = TextEditingController();
+  final _adresse = TextEditingController();
+  final _rccm = TextEditingController();
+  final _vehicules = TextEditingController(text: '0');
+  final _soldeInitial = TextEditingController(text: '0');
+  PlanAccount? _selectedAccount;
+  late String _type;
+
+  @override
+  void initState() {
+    super.initState();
+    final provider = widget.initial;
+    _type = provider?.type ?? 'Transporteur';
+    if (provider == null) return;
+    _entreprise.text = provider.entreprise;
+    _pays.text = provider.pays;
+    _villePort.text = provider.villePort;
+    _contact.text = provider.contact;
+    _telephone.text = provider.telephone;
+    _email.text = provider.email;
+    _services.text = provider.services;
+    _adresse.text = provider.adresse;
+    _rccm.text = provider.rccm;
+    _vehicules.text = provider.nombreVehicules.toString();
+    _soldeInitial.text = provider.soldeInitial.toString();
+    for (final account in widget.comptes) {
+      if (account.code == provider.compteComptable) {
+        _selectedAccount = account;
+        break;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _entreprise.dispose();
+    _pays.dispose();
+    _villePort.dispose();
+    _contact.dispose();
+    _telephone.dispose();
+    _email.dispose();
+    _services.dispose();
+    _adresse.dispose();
+    _rccm.dispose();
+    _vehicules.dispose();
+    _soldeInitial.dispose();
+    super.dispose();
+  }
+
+  String? _requiredValidator(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Ce champ est obligatoire';
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(
+        widget.initial == null
+            ? 'Créer un prestataire'
+            : 'Modifier le prestataire',
+      ),
+      content: SizedBox(
+        width: 520,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  initialValue: _type,
+                  decoration: const InputDecoration(
+                    labelText: 'Type de partenaire',
+                    prefixIcon: Icon(Icons.category_outlined),
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'Transporteur',
+                      child: Text('Transporteur'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Transitaire',
+                      child: Text('Transitaire'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Chargeur',
+                      child: Text('Chargeur'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Partenaire local',
+                      child: Text('Partenaire local'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setState(() => _type = value);
+                  },
+                ),
+                const SizedBox(height: 10),
+                _formField(
+                  _entreprise,
+                  'Nom de l’entreprise ou de la société',
+                  validator: _requiredValidator,
+                ),
+                _formField(_pays, 'Pays', validator: _requiredValidator),
+                _formField(
+                  _villePort,
+                  'Ville / port (ex. Dakar, Abidjan, Bamako)',
+                  validator: _requiredValidator,
+                ),
+                _formField(_contact, 'Nom du contact'),
+                _formField(
+                  _telephone,
+                  'Téléphone',
+                  keyboardType: TextInputType.phone,
+                  validator: _requiredValidator,
+                ),
+                _formField(
+                  _email,
+                  'Adresse e-mail',
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                _formField(_adresse, 'Adresse', maxLines: 2),
+                _formField(_rccm, 'RCCM'),
+                if (_type == 'Transporteur')
+                  _formField(
+                    _vehicules,
+                    'Nombre de véhicules',
+                    keyboardType: TextInputType.number,
+                    validator: (value) {
+                      final count = int.tryParse((value ?? '').trim());
+                      return count == null || count < 0
+                          ? 'Saisissez un nombre valide'
+                          : null;
+                    },
+                  ),
+                _formField(
+                  _soldeInitial,
+                  'Solde initial fournisseur (FCFA)',
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  validator: _amountValidator,
+                ),
+                _formField(
+                  _services,
+                  'Services proposés (transport, transit, location...)',
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 14),
+                SearchableDropdownFormField<PlanAccount>(
+                  key: const ValueKey('provider-account-picker'),
+                  options: widget.comptes
+                      .where(
+                        (account) =>
+                            account.nature == 'Fournisseur' &&
+                            (account.tiersId == null ||
+                                account.tiersId == _selectedAccount?.tiersId),
+                      )
+                      .toList(),
+                  value: _selectedAccount,
+                  label: 'Compte comptable fournisseur *',
+                  emptyText: 'Aucun compte de nature Fournisseur dans le plan',
+                  displayString: (account) =>
+                      '${account.code} • ${account.libelle}',
+                  onChanged: (account) =>
+                      setState(() => _selectedAccount = account),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Annuler'),
+        ),
+        ElevatedButton.icon(
+          onPressed: _save,
+          icon: const Icon(Icons.save_outlined),
+          label: Text(
+            widget.initial == null
+                ? 'Enregistrer'
+                : 'Enregistrer les modifications',
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF1A237E),
+            foregroundColor: Colors.white,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _formField(
+    TextEditingController controller,
+    String label, {
+    String? Function(String?)? validator,
+    TextInputType? keyboardType,
+    int maxLines = 1,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: TextFormField(
+        controller: controller,
+        validator: validator,
+        keyboardType: keyboardType,
+        maxLines: maxLines,
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    final account = _selectedAccount;
+    if (account == null) {
+      _showMessage('Sélectionnez un compte fournisseur existant.');
+      return;
+    }
+    final name = _entreprise.text.trim();
+    final rccm = _rccm.text.trim();
+    final duplicate = widget.prestataires.any(
+      (provider) =>
+          provider.id != widget.initial?.id &&
+          (_normalizeUniqueValue(provider.entreprise) ==
+                  _normalizeUniqueValue(name) ||
+              (rccm.isNotEmpty &&
+                  _normalizeUniqueValue(provider.rccm) ==
+                      _normalizeUniqueValue(rccm))),
+    );
+    if (duplicate) {
+      await _showDuplicateAlert(context, 'Ce prestataire');
+      return;
+    }
+    final id =
+        widget.initial?.id ?? DateTime.now().microsecondsSinceEpoch.toString();
+    final openingBalance = double.parse(
+      _soldeInitial.text.trim().replaceAll(' ', '').replaceAll(',', '.'),
+    );
+    if (widget.initial != null &&
+        widget.initial!.compteComptable != account.code) {
+      for (final previousAccount in widget.comptes) {
+        if (previousAccount.code == widget.initial!.compteComptable &&
+            previousAccount.tiersId == id) {
+          previousAccount.tiersId = null;
+          break;
+        }
+      }
+    }
+    account.tiersId ??= id;
+    Navigator.pop(
+      context,
+      Prestataire(
+        id: id,
+        entreprise: _entreprise.text.trim(),
+        type: _type,
+        pays: _pays.text.trim(),
+        villePort: _villePort.text.trim(),
+        contact: _contact.text.trim().isEmpty
+            ? 'Contact à définir'
+            : _contact.text.trim(),
+        telephone: _telephone.text.trim(),
+        email: _email.text.trim(),
+        services: _services.text.trim().isEmpty
+            ? 'Services à préciser'
+            : _services.text.trim(),
+        adresse: _adresse.text.trim(),
+        rccm: _rccm.text.trim(),
+        nombreVehicules: int.parse(_vehicules.text.trim()),
+        soldeInitial: openingBalance,
+        compteComptable: account.code,
+      ),
+    );
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+}
+
+class JournalCodesPage extends StatefulWidget {
+  final List<JournalCode> journals;
+  final List<PlanAccount> comptes;
+
+  const JournalCodesPage({
+    super.key,
+    required this.journals,
+    required this.comptes,
+  });
+
+  @override
+  State<JournalCodesPage> createState() => _JournalCodesPageState();
+}
+
+class _JournalCodesPageState extends State<JournalCodesPage> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final journals = widget.journals.where((journal) {
+      final text =
+          '${journal.code} ${journal.intitule} ${journal.type} ${journal.compteTresorerie}'
+              .toLowerCase();
+      return text.contains(_query.toLowerCase());
+    }).toList();
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FD),
+      appBar: AppBar(
+        title: const Text('Codes journaux'),
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1A237E),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(72),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: TextField(
+              onChanged: (value) => setState(() => _query = value),
+              decoration: const InputDecoration(
+                hintText: 'Rechercher un code, intitulé ou compte…',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+        ),
+      ),
+      body: journals.isEmpty
+          ? const Center(
+              child: Text('Aucun code journal. Ajoutez votre premier journal.'),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: journals.length,
+              itemBuilder: (context, index) {
+                final journal = journals[index];
+                return Card(
+                  child: ListTile(
+                    leading: const CircleAvatar(
+                      child: Icon(Icons.menu_book_rounded),
+                    ),
+                    title: Text(
+                      '${journal.code} • ${journal.intitule}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Text(
+                      'Type : ${journal.type} • Compte de trésorerie : ${journal.compteTresorerie}',
+                    ),
+                    trailing: IconButton(
+                      key: ValueKey('edit-journal-${journal.code}'),
+                      tooltip: 'Modifier le code journal',
+                      onPressed: () => _addJournal(journal),
+                      icon: const Icon(Icons.edit_outlined),
+                    ),
+                  ),
+                );
+              },
+            ),
+      floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'journal-add',
+        onPressed: _addJournal,
+        icon: const Icon(Icons.add),
+        label: const Text('NOUVEAU JOURNAL'),
+      ),
+    );
+  }
+
+  Future<void> _addJournal([JournalCode? initial]) async {
+    final journal = await showDialog<JournalCode>(
+      context: context,
+      builder: (context) => _JournalCodeFormDialog(
+        comptes: widget.comptes,
+        existingCodes: widget.journals.map((entry) => entry.code).toSet(),
+        initial: initial,
+      ),
+    );
+    if (journal != null && mounted) {
+      setState(() {
+        if (initial == null) {
+          widget.journals.add(journal);
+        } else {
+          final index = widget.journals.indexWhere(
+            (entry) => entry.code == initial.code,
+          );
+          if (index >= 0) widget.journals[index] = journal;
+        }
+      });
+    }
+  }
+}
+
+class _JournalCodeFormDialog extends StatefulWidget {
+  final List<PlanAccount> comptes;
+  final Set<String> existingCodes;
+  final JournalCode? initial;
+
+  const _JournalCodeFormDialog({
+    required this.comptes,
+    required this.existingCodes,
+    this.initial,
+  });
+
+  @override
+  State<_JournalCodeFormDialog> createState() => _JournalCodeFormDialogState();
+}
+
+class _JournalCodeFormDialogState extends State<_JournalCodeFormDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _code = TextEditingController();
+  final _intitule = TextEditingController();
+  late String _type;
+  PlanAccount? _account;
+
+  @override
+  void initState() {
+    super.initState();
+    final journal = widget.initial;
+    _type = journal?.type ?? 'Banque';
+    if (journal == null) return;
+    _code.text = journal.code;
+    _intitule.text = journal.intitule;
+    for (final account in widget.comptes) {
+      if (account.code == journal.compteTresorerie) {
+        _account = account;
+        break;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _code.dispose();
+    _intitule.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(
+      widget.initial == null
+          ? 'Créer un code journal'
+          : 'Modifier le code journal',
+    ),
+    content: SizedBox(
+      width: 480,
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                key: const ValueKey('journal-code'),
+                controller: _code,
+                textCapitalization: TextCapitalization.characters,
+                decoration: const InputDecoration(
+                  labelText: 'Code journal *',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) {
+                  final code = (value ?? '').trim().toUpperCase();
+                  if (code.isEmpty) return 'Saisissez le code du journal';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const ValueKey('journal-intitule'),
+                controller: _intitule,
+                decoration: const InputDecoration(
+                  labelText: 'Intitulé *',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'Saisissez l’intitulé du journal'
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: _type,
+                decoration: const InputDecoration(
+                  labelText: 'Type de journal *',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'Achats', child: Text('Achats')),
+                  DropdownMenuItem(value: 'Ventes', child: Text('Ventes')),
+                  DropdownMenuItem(value: 'Banque', child: Text('Banque')),
+                  DropdownMenuItem(value: 'Caisse', child: Text('Caisse')),
+                  DropdownMenuItem(
+                    value: 'Opérations diverses',
+                    child: Text('Opérations diverses'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) setState(() => _type = value);
+                },
+              ),
+              const SizedBox(height: 12),
+              SearchableDropdownFormField<PlanAccount>(
+                key: const ValueKey('journal-account-picker'),
+                options: widget.comptes
+                    .where(
+                      (account) =>
+                          account.nature == 'Banque' ||
+                          account.nature == 'Caisse',
+                    )
+                    .toList(),
+                value: _account,
+                label: 'Compte de trésorerie / contrepartie *',
+                emptyText: 'Ajoutez d’abord un compte Banque ou Caisse',
+                displayString: (account) =>
+                    '${account.code} • ${account.libelle}',
+                onChanged: (account) => setState(() => _account = account),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Annuler'),
+      ),
+      FilledButton(
+        onPressed: () {
+          _save();
+        },
+        child: Text(
+          widget.initial == null
+              ? 'Enregistrer'
+              : 'Enregistrer les modifications',
+        ),
+      ),
+    ],
+  );
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    final code = _code.text.trim().toUpperCase();
+    if (widget.existingCodes.any(
+      (existing) =>
+          _normalizeUniqueValue(existing) == _normalizeUniqueValue(code) &&
+          existing != widget.initial?.code,
+    )) {
+      await _showDuplicateAlert(context, 'Ce code journal');
+      return;
+    }
+    final account = _account;
+    if (account == null) {
+      await _showInfoAlert(
+        context,
+        title: 'Compte obligatoire',
+        message:
+            'Sélectionnez un compte de trésorerie ou de contrepartie dans le plan comptable.',
+      );
+      return;
+    }
+    Navigator.pop(
+      context,
+      JournalCode(
+        code: code,
+        intitule: _intitule.text.trim(),
+        type: _type,
+        compteTresorerie: account.code,
+      ),
+    );
+  }
+}
+
+class DossierInvoicesPage extends StatefulWidget {
+  final List<TransitDossier> dossiers;
+  final DossierInvoiceKind kind;
+  final List<Prestataire> prestataires;
+  final String userDisplayName;
+
+  const DossierInvoicesPage({
+    super.key,
+    required this.dossiers,
+    required this.kind,
+    this.prestataires = const [],
+    this.userDisplayName = 'Administrateur',
+  });
+
+  @override
+  State<DossierInvoicesPage> createState() => _DossierInvoicesPageState();
+}
+
+class _DossierInvoicesPageState extends State<DossierInvoicesPage> {
+  String _query = '';
+  bool get _isClient => widget.kind == DossierInvoiceKind.client;
+  bool get _isTransitaire => widget.kind == DossierInvoiceKind.forwarder;
+  bool get _isTransporteur => widget.kind == DossierInvoiceKind.carrier;
+  String get _title => switch (widget.kind) {
+    DossierInvoiceKind.client => 'Facture Client',
+    DossierInvoiceKind.provider => 'Facture Prestataire',
+    DossierInvoiceKind.forwarder => 'Facture Transitaire',
+    DossierInvoiceKind.carrier => 'Facture Transporteur',
+  };
+
+  DossierInvoice _invoiceFor(TransitDossier dossier) => switch (widget.kind) {
+    DossierInvoiceKind.client => dossier.factureClient,
+    DossierInvoiceKind.provider => dossier.facturePrestataire,
+    DossierInvoiceKind.forwarder => dossier.factureTransitaire,
+    DossierInvoiceKind.carrier => dossier.factureTransporteur,
+  };
+
+  Prestataire? _partnerFor(TransitDossier dossier) => switch (widget.kind) {
+    DossierInvoiceKind.forwarder =>
+      dossier.transitaireAffecte ??
+          (dossier.prestataire?.type == 'Transitaire'
+              ? dossier.prestataire
+              : null),
+    DossierInvoiceKind.carrier =>
+      dossier.transporteurAffecte ??
+          (dossier.prestataire?.type == 'Transporteur'
+              ? dossier.prestataire
+              : null),
+    _ => dossier.prestataire,
+  };
+
+  bool _matchesPartnerKind(TransitDossier dossier) {
+    if (!_isTransitaire && !_isTransporteur) return true;
+    if (dossier.prestataire == null) return true;
+    return _isTransitaire
+        ? dossier.prestataire!.type == 'Transitaire'
+        : dossier.prestataire!.type == 'Transporteur';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final invoices =
+        widget.dossiers
+            .map((dossier) => (dossier, _invoiceFor(dossier)))
+            .where((entry) => _matchesPartnerKind(entry.$1))
+            .toList()
+          ..sort((a, b) => b.$1.dateCreation.compareTo(a.$1.dateCreation));
+    final matchingInvoices = invoices.where((entry) {
+      final dossier = entry.$1;
+      final invoice = entry.$2;
+      final recipient = _isClient
+          ? dossier.client.nom
+          : _partnerFor(dossier)?.entreprise ?? 'Prestataire non affecté';
+      final searchText =
+          '${invoice.reference} ${dossier.numDossier} ${dossier.numBL} $recipient ${invoice.description} ${invoice.lignes.map((line) => line.description).join(' ')}'
+              .toLowerCase();
+      return searchText.contains(_query.toLowerCase());
+    }).toList();
+    final issuedTotal = invoices
+        .where((entry) => entry.$2.statut == 'Clôturée')
+        .fold<double>(0, (total, entry) => total + entry.$2.montant);
+    final title = _title;
+
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF8F9FD),
+        appBar: AppBar(
+          title: Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: Colors.white,
+          foregroundColor: const Color(0xFF1A237E),
+          elevation: 0,
+        ),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1100),
+            child: Column(
+              children: [
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1A237E),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 21,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _isClient
+                            ? 'Factures de prestation adressées à vos clients.'
+                            : _isTransitaire
+                            ? 'Factures des prestations de transit.'
+                            : _isTransporteur
+                            ? 'Factures des transports et chargements.'
+                            : 'Factures prestataires liées aux dossiers.',
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Total des factures émises : ${formatCurrency(issuedTotal)} FCFA',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                  child: TextField(
+                    key: const ValueKey('invoice-search'),
+                    onChanged: (value) => setState(() => _query = value),
+                    decoration: InputDecoration(
+                      hintText: 'Rechercher par facture, dossier, BL ou tiers…',
+                      prefixIcon: const Icon(Icons.search_rounded),
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+                const TabBar(
+                  tabs: [
+                    Tab(text: 'Factures en cours'),
+                    Tab(text: 'Factures validées'),
+                  ],
+                  labelColor: Color(0xFF1A237E),
+                  unselectedLabelColor: Colors.black54,
+                ),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      _buildInvoiceList(
+                        matchingInvoices
+                            .where((entry) => entry.$2.statut != 'Clôturée')
+                            .toList(),
+                      ),
+                      _buildInvoiceList(
+                        matchingInvoices
+                            .where((entry) => entry.$2.statut == 'Clôturée')
+                            .toList(),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInvoiceList(List<(TransitDossier, DossierInvoice)> invoices) {
+    if (invoices.isEmpty) {
+      return const Center(child: Text('Aucune facture dans cette catégorie.'));
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      itemCount: invoices.length,
+      itemBuilder: (context, index) {
+        final dossier = invoices[index].$1;
+        final invoice = invoices[index].$2;
+        final recipient = _isClient
+            ? dossier.client.nom
+            : _partnerFor(dossier)?.entreprise ?? 'Prestataire non affecté';
+        return Card(
+          child: ListTile(
+            leading: CircleAvatar(
+              backgroundColor: invoice.statut == 'Clôturée'
+                  ? const Color(0xFFE8F5E9)
+                  : const Color(0xFFFFF3E0),
+              child: Icon(
+                invoice.statut == 'Clôturée'
+                    ? Icons.receipt_long_rounded
+                    : Icons.edit_note_rounded,
+                color: invoice.statut == 'Clôturée'
+                    ? Colors.green.shade700
+                    : Colors.orange.shade800,
+              ),
+            ),
+            title: Text(
+              '${invoice.reference} • ${dossier.numDossier}',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            subtitle: Text(
+              '$recipient\n${invoice.description.isEmpty ? 'Ouvrir la facture pour saisir les prestations' : invoice.description} • ${invoice.statut}',
+            ),
+            isThreeLine: true,
+            trailing: SizedBox(
+              width: 148,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Flexible(
+                    child: Text(
+                      '${formatCurrency(invoice.montant)} F',
+                      textAlign: TextAlign.end,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  IconButton(
+                    key: ValueKey('edit-${invoice.id}'),
+                    tooltip: 'Ouvrir la facture',
+                    onPressed: () => _editInvoice(dossier, invoice),
+                    icon: Icon(
+                      invoice.statut == 'Clôturée'
+                          ? Icons.lock_outline_rounded
+                          : Icons.open_in_new_rounded,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            onTap: () => _editInvoice(dossier, invoice),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _editInvoice(
+    TransitDossier dossier,
+    DossierInvoice invoice,
+  ) async {
+    final updated = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DossierInvoiceDetailPage(
+          invoice: invoice,
+          dossier: dossier,
+          kind: widget.kind,
+          prestataires: widget.prestataires,
+          userDisplayName: widget.userDisplayName,
+        ),
+      ),
+    );
+    if (updated == true && mounted) setState(() {});
+  }
+}
+
+class _InvoiceLineDraft {
+  final description = TextEditingController();
+  final quantity = TextEditingController(text: '1');
+  final unitPrice = TextEditingController();
+  final containerNumber = TextEditingController();
+  final bl = TextEditingController();
+  final cargo = TextEditingController();
+  final containerType = TextEditingController();
+  final transitFee = TextEditingController();
+  final volumeWeight = TextEditingController();
+  final demurrage = TextEditingController();
+  final toll = TextEditingController();
+  final otherFee = TextEditingController();
+  final truckAdvance = TextEditingController();
+  final vehiclePlate = TextEditingController();
+
+  _InvoiceLineDraft({InvoiceLine? line, TransitContainer? container}) {
+    if (line != null) {
+      description.text = line.description;
+      quantity.text = line.quantite.toString();
+      unitPrice.text = line.prixUnitaire.toStringAsFixed(0);
+      containerNumber.text = line.numeroConteneur;
+      bl.text = line.bl;
+      cargo.text = line.marchandise;
+      containerType.text = line.typeConteneur;
+      transitFee.text = _draftAmount(line.fraisTransit);
+      volumeWeight.text = _draftAmount(line.volumePoids);
+      demurrage.text = _draftAmount(line.surestariesMagasinage);
+      toll.text = _draftAmount(line.fraisPeage);
+      otherFee.text = _draftAmount(line.autresFrais);
+      truckAdvance.text = _draftAmount(line.avanceCamion);
+      vehiclePlate.text = line.plaqueVehicule;
+    } else if (container != null) {
+      description.text = 'Prestation transport ${container.numero}';
+      containerNumber.text = container.numero;
+      cargo.text = container.marchandise;
+      containerType.text = container.type;
+    }
+  }
+
+  String _draftAmount(double value) =>
+      value == 0 ? '' : value.toStringAsFixed(0);
+
+  void dispose() {
+    description.dispose();
+    quantity.dispose();
+    unitPrice.dispose();
+    containerNumber.dispose();
+    bl.dispose();
+    cargo.dispose();
+    containerType.dispose();
+    transitFee.dispose();
+    volumeWeight.dispose();
+    demurrage.dispose();
+    toll.dispose();
+    otherFee.dispose();
+    truckAdvance.dispose();
+    vehiclePlate.dispose();
+  }
+}
+
+class DossierInvoiceDetailPage extends StatefulWidget {
+  final DossierInvoice invoice;
+  final TransitDossier dossier;
+  final DossierInvoiceKind kind;
+  final List<Prestataire> prestataires;
+  final String userDisplayName;
+
+  const DossierInvoiceDetailPage({
+    super.key,
+    required this.invoice,
+    required this.dossier,
+    required this.kind,
+    required this.prestataires,
+    required this.userDisplayName,
+  });
+
+  @override
+  State<DossierInvoiceDetailPage> createState() =>
+      _DossierInvoiceDetailPageState();
+}
+
+class _DossierInvoiceDetailPageState extends State<DossierInvoiceDetailPage> {
+  final List<_InvoiceLineDraft> _lines = [];
+  Prestataire? _selectedPrestataire;
+
+  bool get _isClient => widget.kind == DossierInvoiceKind.client;
+  bool get _isTransitaire => widget.kind == DossierInvoiceKind.forwarder;
+  bool get _isTransporteur => widget.kind == DossierInvoiceKind.carrier;
+  bool get _isClosed => widget.invoice.statut == 'Clôturée';
+  String get _title => switch (widget.kind) {
+    DossierInvoiceKind.client => 'Facture Client',
+    DossierInvoiceKind.provider => 'Facture Prestataire',
+    DossierInvoiceKind.forwarder => 'Facture Transitaire',
+    DossierInvoiceKind.carrier => 'Facture Transporteur',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    final assignedProvider = switch (widget.kind) {
+      DossierInvoiceKind.forwarder =>
+        widget.dossier.transitaireAffecte ??
+            (widget.dossier.prestataire?.type == 'Transitaire'
+                ? widget.dossier.prestataire
+                : null),
+      DossierInvoiceKind.carrier =>
+        widget.dossier.transporteurAffecte ??
+            (widget.dossier.prestataire?.type == 'Transporteur'
+                ? widget.dossier.prestataire
+                : null),
+      _ => widget.dossier.prestataire,
+    };
+    _selectedPrestataire =
+        (widget.kind == DossierInvoiceKind.forwarder &&
+                assignedProvider?.type != 'Transitaire') ||
+            (widget.kind == DossierInvoiceKind.carrier &&
+                assignedProvider?.type != 'Transporteur')
+        ? null
+        : assignedProvider;
+    if (widget.invoice.lignes.isNotEmpty) {
+      _lines.addAll(
+        widget.invoice.lignes.map((line) => _InvoiceLineDraft(line: line)),
+      );
+    } else if (widget.invoice.description.isNotEmpty ||
+        widget.invoice.montant > 0) {
+      _lines.add(
+        _InvoiceLineDraft(
+          line: InvoiceLine(
+            description: widget.invoice.description,
+            quantite: 1,
+            prixUnitaire: widget.invoice.montant,
+          ),
+        ),
+      );
+    } else if (_isClient) {
+      _lines.add(
+        _InvoiceLineDraft(
+          line: InvoiceLine(
+            description: widget.dossier.typeMarchandise.isEmpty
+                ? 'Prestation de transport'
+                : widget.dossier.typeMarchandise,
+            quantite: widget.dossier.nbConteneurs > 0
+                ? widget.dossier.nbConteneurs.toDouble()
+                : 1,
+            prixUnitaire: 0,
+          ),
+        ),
+      );
+    } else if (!_isClient && widget.dossier.conteneurs.isNotEmpty) {
+      _lines.addAll(
+        widget.dossier.conteneurs.map(
+          (container) => _InvoiceLineDraft(container: container),
+        ),
+      );
+    } else {
+      _lines.add(_InvoiceLineDraft());
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final line in _lines) {
+      line.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final recipient = _isClient
+        ? widget.dossier.client.nom
+        : widget.dossier.prestataire?.entreprise ?? 'Prestataire non affecté';
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FD),
+      appBar: AppBar(
+        title: Text(
+          '$_title ${widget.invoice.reference}',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: const Color(0xFF1A237E),
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            key: const ValueKey('print-invoice'),
+            tooltip: 'Imprimer / enregistrer en PDF',
+            onPressed: _printInvoice,
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Chip(
+              label: Text(widget.invoice.statut),
+              backgroundColor: Colors.white,
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+        ],
+      ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1100),
+          child: Column(
+            children: [
+              Card(
+                margin: const EdgeInsets.all(16),
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Dossier : ${widget.dossier.numDossier}',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '${_isClient ? 'Client' : 'Prestataire'} : ${_isClient ? recipient : _selectedPrestataire?.entreprise ?? recipient}',
+                      ),
+                      if (!_isClient &&
+                          (widget.dossier.prestataire == null ||
+                              (_isTransitaire &&
+                                  widget.dossier.prestataire!.type !=
+                                      'Transitaire') ||
+                              (_isTransporteur &&
+                                  widget.dossier.prestataire!.type !=
+                                      'Transporteur'))) ...[
+                        const SizedBox(height: 14),
+                        SearchableDropdownFormField<Prestataire>(
+                          key: const ValueKey('invoice-provider-search'),
+                          options: widget.prestataires.where((provider) {
+                            if (_isTransitaire) {
+                              return provider.type == 'Transitaire';
+                            }
+                            if (_isTransporteur) {
+                              return provider.type == 'Transporteur';
+                            }
+                            return true;
+                          }).toList(),
+                          value: _selectedPrestataire,
+                          label: _isTransitaire
+                              ? 'Rechercher et affecter un transitaire'
+                              : _isTransporteur
+                              ? 'Rechercher et affecter un transporteur'
+                              : 'Rechercher et affecter un prestataire',
+                          emptyText: 'Aucun prestataire enregistré',
+                          displayString: (provider) =>
+                              '${provider.entreprise} • ${provider.villePort}',
+                          onChanged: (provider) =>
+                              setState(() => _selectedPrestataire = provider),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Prestations facturées',
+                            style: Theme.of(context).textTheme.titleLarge
+                                ?.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        if (!_isClosed)
+                          FilledButton.tonalIcon(
+                            key: const ValueKey('add-invoice-line'),
+                            onPressed: () =>
+                                setState(() => _lines.add(_InvoiceLineDraft())),
+                            icon: const Icon(Icons.add),
+                            label: const Text('Ajouter une ligne'),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    if (_lines.isEmpty)
+                      const Card(
+                        child: Padding(
+                          padding: EdgeInsets.all(20),
+                          child: Text('Aucune prestation sur cette facture.'),
+                        ),
+                      ),
+                    ...List.generate(_lines.length, (index) {
+                      final line = _lines[index];
+                      return Card(
+                        key: ValueKey('invoice-line-$index'),
+                        margin: const EdgeInsets.only(bottom: 10),
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Wrap(
+                            spacing: 12,
+                            runSpacing: 10,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: 340,
+                                child: TextFormField(
+                                  key: ValueKey('invoice-description-$index'),
+                                  controller: line.description,
+                                  enabled: !_isClosed,
+                                  onChanged: (_) => setState(() {}),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Désignation / prestation',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                ),
+                              ),
+                              if (_isClient) ...[
+                                _invoiceField(
+                                  line.quantity,
+                                  'Quantité (conteneurs)',
+                                  'invoice-quantity-$index',
+                                  numeric: true,
+                                  width: 160,
+                                ),
+                                _invoiceField(
+                                  line.unitPrice,
+                                  'Prix unitaire',
+                                  'invoice-price-$index',
+                                  numeric: true,
+                                  width: 190,
+                                  suffix: 'FCFA',
+                                ),
+                              ] else ...[
+                                _invoiceField(
+                                  line.containerNumber,
+                                  'N° conteneur',
+                                  'invoice-container-$index',
+                                ),
+                                _invoiceField(
+                                  line.bl,
+                                  'N° BL',
+                                  'invoice-bl-$index',
+                                ),
+                                _invoiceField(
+                                  line.cargo,
+                                  'Marchandise',
+                                  'invoice-cargo-$index',
+                                ),
+                                _invoiceField(
+                                  line.containerType,
+                                  'Type conteneur',
+                                  'invoice-container-type-$index',
+                                ),
+                                _invoiceField(
+                                  line.transitFee,
+                                  'Frais de transit',
+                                  'invoice-transit-fee-$index',
+                                  numeric: true,
+                                  suffix: 'FCFA',
+                                ),
+                                _invoiceField(
+                                  line.volumeWeight,
+                                  'Poids / volume',
+                                  'invoice-volume-$index',
+                                  numeric: true,
+                                  suffix: 'FCFA',
+                                ),
+                                _invoiceField(
+                                  line.demurrage,
+                                  'Surestaries / magasinage',
+                                  'invoice-demurrage-$index',
+                                  numeric: true,
+                                  suffix: 'FCFA',
+                                ),
+                                _invoiceField(
+                                  line.toll,
+                                  'Péage',
+                                  'invoice-toll-$index',
+                                  numeric: true,
+                                  suffix: 'FCFA',
+                                ),
+                                _invoiceField(
+                                  line.otherFee,
+                                  'Autres frais',
+                                  'invoice-other-fee-$index',
+                                  numeric: true,
+                                  suffix: 'FCFA',
+                                ),
+                                _invoiceField(
+                                  line.truckAdvance,
+                                  'Avance camion',
+                                  'invoice-truck-advance-$index',
+                                  numeric: true,
+                                  suffix: 'FCFA',
+                                ),
+                                _invoiceField(
+                                  line.vehiclePlate,
+                                  'Plaque véhicule',
+                                  'invoice-vehicle-plate-$index',
+                                ),
+                              ],
+                              SizedBox(
+                                width: 150,
+                                child: Text(
+                                  '${formatCurrency(_lineTotal(line))} FCFA',
+                                  key: ValueKey('invoice-total-$index'),
+                                  textAlign: TextAlign.end,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF1A237E),
+                                  ),
+                                ),
+                              ),
+                              if (!_isClosed)
+                                IconButton(
+                                  tooltip: 'Supprimer cette ligne',
+                                  onPressed: () => setState(() {
+                                    _lines.removeAt(index).dispose();
+                                  }),
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    color: Colors.redAccent,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(18),
+                        child: Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                'TOTAL DE LA FACTURE',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            Text(
+                              '${formatCurrency(_total)} FCFA',
+                              key: const ValueKey('invoice-grand-total'),
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1A237E),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (!_isClosed)
+                SafeArea(
+                  top: false,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    color: Colors.white,
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 10,
+                      runSpacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                          key: const ValueKey('save-invoice-exit'),
+                          onPressed: _saveAndExit,
+                          icon: const Icon(Icons.save_outlined),
+                          label: const Text('Enregistrer et quitter'),
+                        ),
+                        FilledButton.icon(
+                          key: const ValueKey('close-invoice'),
+                          onPressed: _closeInvoice,
+                          icon: const Icon(Icons.lock_outline_rounded),
+                          label: const Text('Valider et clôturer la facture'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  double get _total =>
+      _lines.fold(0, (total, line) => total + _lineTotal(line));
+
+  double _lineTotal(_InvoiceLineDraft line) {
+    if (_isClient) {
+      return (_number(line.quantity.text) ?? 0) *
+          (_number(line.unitPrice.text) ?? 0);
+    }
+    return (_number(line.transitFee.text) ?? 0) +
+        (_number(line.volumeWeight.text) ?? 0) +
+        (_number(line.demurrage.text) ?? 0) +
+        (_number(line.toll.text) ?? 0) +
+        (_number(line.otherFee.text) ?? 0) -
+        (_number(line.truckAdvance.text) ?? 0);
+  }
+
+  Widget _invoiceField(
+    TextEditingController controller,
+    String label,
+    String keyName, {
+    bool numeric = false,
+    String? suffix,
+    double width = 180,
+  }) => SizedBox(
+    width: width,
+    child: TextFormField(
+      key: ValueKey(keyName),
+      controller: controller,
+      enabled: !_isClosed,
+      keyboardType: numeric
+          ? const TextInputType.numberWithOptions(decimal: true)
+          : TextInputType.text,
+      onChanged: (_) => setState(() {}),
+      decoration: InputDecoration(
+        labelText: label,
+        suffixText: suffix,
+        border: const OutlineInputBorder(),
+      ),
+    ),
+  );
+
+  double? _number(String value) =>
+      double.tryParse(value.trim().replaceAll(' ', '').replaceAll(',', '.'));
+
+  List<InvoiceLine>? _readLines({required bool requireComplete}) {
+    final result = <InvoiceLine>[];
+    for (var index = 0; index < _lines.length; index++) {
+      final line = _lines[index];
+      final description = line.description.text.trim();
+      final quantityText = line.quantity.text.trim();
+      final priceText = line.unitPrice.text.trim();
+      final providerHasDetails = [
+        line.containerNumber,
+        line.bl,
+        line.cargo,
+        line.containerType,
+        line.transitFee,
+        line.volumeWeight,
+        line.demurrage,
+        line.toll,
+        line.otherFee,
+        line.truckAdvance,
+        line.vehiclePlate,
+      ].any((controller) => controller.text.trim().isNotEmpty);
+      if (description.isEmpty &&
+          quantityText == '1' &&
+          priceText.isEmpty &&
+          !providerHasDetails) {
+        continue;
+      }
+      if (!_isClient) {
+        final amounts = [
+          line.transitFee,
+          line.volumeWeight,
+          line.demurrage,
+          line.toll,
+          line.otherFee,
+          line.truckAdvance,
+        ].map((controller) => _number(controller.text) ?? 0).toList();
+        if (description.isEmpty ||
+            amounts.any((amount) => amount < 0) ||
+            _number(line.transitFee.text) == null &&
+                line.transitFee.text.isNotEmpty ||
+            _number(line.volumeWeight.text) == null &&
+                line.volumeWeight.text.isNotEmpty ||
+            _number(line.demurrage.text) == null &&
+                line.demurrage.text.isNotEmpty ||
+            _number(line.toll.text) == null && line.toll.text.isNotEmpty ||
+            _number(line.otherFee.text) == null &&
+                line.otherFee.text.isNotEmpty ||
+            _number(line.truckAdvance.text) == null &&
+                line.truckAdvance.text.isNotEmpty) {
+          _showMessage(
+            'Vérifiez la désignation et les montants de la prestation.',
+          );
+          return null;
+        }
+        if (requireComplete && _lineTotal(line) == 0) {
+          _showMessage(
+            'Saisissez un frais ou une avance pour chaque prestation.',
+          );
+          return null;
+        }
+        result.add(
+          InvoiceLine(
+            description: description,
+            quantite: 1,
+            prixUnitaire: 0,
+            numeroConteneur: line.containerNumber.text.trim(),
+            bl: line.bl.text.trim(),
+            marchandise: line.cargo.text.trim(),
+            typeConteneur: line.containerType.text.trim(),
+            fraisTransit: amounts[0],
+            volumePoids: amounts[1],
+            surestariesMagasinage: amounts[2],
+            fraisPeage: amounts[3],
+            autresFrais: amounts[4],
+            avanceCamion: amounts[5],
+            plaqueVehicule: line.vehiclePlate.text.trim(),
+          ),
+        );
+        continue;
+      }
+      final quantity = _number(quantityText);
+      final unitPrice = priceText.isEmpty && !requireComplete
+          ? 0.0
+          : _number(priceText);
+      if (description.isEmpty ||
+          quantity == null ||
+          quantity <= 0 ||
+          unitPrice == null ||
+          (requireComplete && unitPrice <= 0)) {
+        _showMessage(
+          'Complétez la désignation, la quantité et le prix de chaque ligne.',
+        );
+        return null;
+      }
+      result.add(
+        InvoiceLine(
+          description: description,
+          quantite: quantity,
+          prixUnitaire: unitPrice,
+        ),
+      );
+    }
+    if (requireComplete && result.isEmpty) {
+      _showMessage('Ajoutez au moins une prestation avant de clôturer.');
+      return null;
+    }
+    return result;
+  }
+
+  void _saveAndExit() {
+    final lines = _readLines(requireComplete: false);
+    if (lines == null) return;
+    if (!_isClient && _selectedPrestataire == null) {
+      _showMessage('Sélectionnez un prestataire avant d’enregistrer.');
+      return;
+    }
+    _saveLines(lines);
+    if (widget.invoice.statut != 'Clôturée') {
+      widget.invoice.statut = lines.isEmpty ? 'Brouillon' : 'En cours';
+    }
+    Navigator.pop(context, true);
+  }
+
+  Future<void> _closeInvoice() async {
+    final lines = _readLines(requireComplete: true);
+    if (lines == null) return;
+    if (!_isClient && _selectedPrestataire == null) {
+      _showMessage('Sélectionnez un prestataire avant de clôturer.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clôturer cette facture ?'),
+        content: const Text(
+          'Après validation, la facture sera verrouillée et ne pourra plus être modifiée.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Continuer la saisie'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Valider et clôturer'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    _saveLines(lines);
+    widget.invoice
+      ..statut = 'Clôturée'
+      ..dateEmission = DateFormat('dd/MM/yyyy').format(DateTime.now());
+    Navigator.pop(context, true);
+  }
+
+  void _saveLines(List<InvoiceLine> lines) {
+    if (!_isClient) {
+      switch (widget.kind) {
+        case DossierInvoiceKind.forwarder:
+          widget.dossier.transitaireAffecte ??= _selectedPrestataire;
+        case DossierInvoiceKind.carrier:
+          widget.dossier.transporteurAffecte ??= _selectedPrestataire;
+        case DossierInvoiceKind.provider:
+          widget.dossier.prestataire ??= _selectedPrestataire;
+        case DossierInvoiceKind.client:
+          break;
+      }
+      widget.dossier.prestataire ??= _selectedPrestataire;
+    }
+    final total = lines.fold<double>(
+      0,
+      (sum, line) =>
+          sum +
+          (_isClient ? line.total : line.totalPrestataire - line.avanceCamion),
+    );
+    widget.invoice
+      ..lignes = lines
+      ..description = lines.map((line) => line.description).join(', ')
+      ..montant = total;
+  }
+
+  Future<void> _printInvoice() async {
+    final isProvider = !_isClient;
+    final pdf = pw.Document();
+    final recipient = isProvider
+        ? (_selectedPrestataire?.entreprise ??
+              widget.dossier.prestataire?.entreprise ??
+              'Prestataire non affecté')
+        : widget.dossier.client.nom;
+    final rows = _lines;
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: isProvider ? PdfPageFormat.a4.landscape : PdfPageFormat.a4,
+        build: (context) => [
+          pw.Container(
+            padding: const pw.EdgeInsets.all(16),
+            decoration: pw.BoxDecoration(
+              color: isProvider ? PdfColors.teal900 : PdfColors.indigo900,
+              borderRadius: pw.BorderRadius.circular(8),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  'SYLLA TRANSIT & TRANSPORT',
+                  style: pw.TextStyle(
+                    color: PdfColors.white,
+                    fontSize: 18,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 4),
+                pw.Text(
+                  switch (widget.kind) {
+                    DossierInvoiceKind.client => 'FACTURE CLIENT',
+                    DossierInvoiceKind.provider => 'FACTURE PRESTATAIRE',
+                    DossierInvoiceKind.forwarder => 'FACTURE TRANSITAIRE',
+                    DossierInvoiceKind.carrier => 'FACTURE TRANSPORTEUR',
+                  },
+                  style: const pw.TextStyle(
+                    color: PdfColors.white,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 16),
+          pw.Text(
+            'Facture : ${widget.invoice.reference}    Dossier : ${widget.dossier.numDossier}',
+            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 6),
+          pw.Text('${isProvider ? 'Prestataire' : 'Client'} : $recipient'),
+          pw.Text('Bon de livraison : ${widget.dossier.numBL}'),
+          pw.Text('Marchandise : ${widget.dossier.typeMarchandise}'),
+          pw.Text('Conteneurs : ${widget.dossier.nbConteneurs}'),
+          pw.Text(
+            'Date : ${widget.invoice.dateEmission.isEmpty ? DateFormat('dd/MM/yyyy').format(DateTime.now()) : widget.invoice.dateEmission}',
+          ),
+          pw.SizedBox(height: 16),
+          if (!isProvider)
+            pw.TableHelper.fromTextArray(
+              headers: ['Désignation', 'Quantité', 'Prix unitaire', 'Montant'],
+              data: rows
+                  .map(
+                    (line) => [
+                      line.description.text,
+                      line.quantity.text,
+                      '${formatCurrency(_number(line.unitPrice.text) ?? 0)} FCFA',
+                      '${formatCurrency(_lineTotal(line))} FCFA',
+                    ],
+                  )
+                  .toList(),
+              headerStyle: pw.TextStyle(
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.white,
+              ),
+              headerDecoration: const pw.BoxDecoration(
+                color: PdfColors.indigo800,
+              ),
+              cellPadding: const pw.EdgeInsets.all(7),
+            )
+          else
+            pw.TableHelper.fromTextArray(
+              headers: [
+                'Conteneur / BL',
+                'Marchandise / type',
+                'Transit',
+                'Poids / volume',
+                'Surestaries / magasinage',
+                'Péage',
+                'Autres frais',
+                'Avance camion',
+                'Plaque',
+                'Net à payer',
+              ],
+              data: rows
+                  .map(
+                    (line) => [
+                      '${line.containerNumber.text}\n${line.bl.text}',
+                      '${line.cargo.text}\n${line.containerType.text}',
+                      formatCurrency(_number(line.transitFee.text) ?? 0),
+                      formatCurrency(_number(line.volumeWeight.text) ?? 0),
+                      formatCurrency(_number(line.demurrage.text) ?? 0),
+                      formatCurrency(_number(line.toll.text) ?? 0),
+                      formatCurrency(_number(line.otherFee.text) ?? 0),
+                      formatCurrency(_number(line.truckAdvance.text) ?? 0),
+                      line.vehiclePlate.text,
+                      '${formatCurrency(_lineTotal(line))} FCFA',
+                    ],
+                  )
+                  .toList(),
+              headerStyle: pw.TextStyle(
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.white,
+                fontSize: 8,
+              ),
+              headerDecoration: const pw.BoxDecoration(
+                color: PdfColors.teal800,
+              ),
+              cellStyle: const pw.TextStyle(fontSize: 8),
+              cellPadding: const pw.EdgeInsets.all(5),
+            ),
+          pw.SizedBox(height: 14),
+          pw.Align(
+            alignment: pw.Alignment.centerRight,
+            child: pw.Text(
+              'TOTAL ${isProvider ? 'NET À PAYER' : 'FACTURE'} : ${formatCurrency(_total)} FCFA',
+              style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
+            ),
+          ),
+        ],
+        footer: (context) => pw.Container(
+          alignment: pw.Alignment.centerRight,
+          margin: const pw.EdgeInsets.only(top: 14),
+          child: pw.Text(
+            'Saisi par : ${widget.userDisplayName}    •    Page ${context.pageNumber}/${context.pagesCount}',
+            style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
+          ),
+        ),
+      ),
+    );
+    await Printing.layoutPdf(onLayout: (format) async => pdf.save());
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+}
+
+// --- PAGE DOSSIERS ---
+
+class DashboardPage extends StatefulWidget {
+  final List<TransitDossier> dossiers;
+  final List<Client> clients;
+  final List<Prestataire> prestataires;
+  final List<JournalCode> journals;
+  const DashboardPage({
+    super.key,
+    required this.dossiers,
+    required this.clients,
+    required this.prestataires,
+    required this.journals,
+  });
+  @override
+  State<DashboardPage> createState() => _DashboardPageState();
+}
+
+class _DashboardPageState extends State<DashboardPage> {
+  String q = "";
+
+  @override
+  Widget build(BuildContext context) {
+    final fil = widget.dossiers
+        .where(
+          (d) =>
+              d.numDossier.toLowerCase().contains(q.toLowerCase()) ||
+              d.client.nom.toLowerCase().contains(q.toLowerCase()),
+        )
+        .toList();
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FD),
+      appBar: AppBar(
+        title: const Text(
+          "Gestion des Dossiers",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: const Color(0xFF1A237E),
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () => Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const LoginPage()),
+            ),
+          ),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(80),
+          child: Center(
+            child: Container(
+              width: 800,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: TextField(
+                onChanged: (v) => setState(() => q = v),
+                decoration: InputDecoration(
+                  hintText: "Rechercher un dossier...",
+                  prefixIcon: const Icon(
+                    Icons.search,
+                    color: Color(0xFF1A237E),
+                  ),
+                  fillColor: Colors.white,
+                  filled: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      body: Center(
+        child: Container(
+          width: 800,
+          child: fil.isEmpty
+              ? const Center(child: Text("Aucun dossier trouvé"))
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: fil.length,
+                  itemBuilder: (context, i) => Card(
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    margin: const EdgeInsets.only(bottom: 12),
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.all(15),
+                      title: Text(
+                        "Dossier: ${fil[i].numDossier}",
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
+                      ),
+                      subtitle: Text(
+                        [
+                          'Client : ${fil[i].client.nom}',
+                          if (fil[i].transitaire.isNotEmpty)
+                            'Transitaire : ${fil[i].transitaire}',
+                          if (fil[i].prestataire != null)
+                            'Prestataire : ${fil[i].prestataire!.entreprise}',
+                          'BL : ${fil[i].numBL.isEmpty ? '-' : fil[i].numBL} • ${fil[i].nbConteneurs} conteneur(s)',
+                        ].join('\n'),
+                      ),
+                      trailing: Text(
+                        "${formatCurrency(fil[i].totalDepenses)} F",
+                        style: const TextStyle(
+                          color: Colors.redAccent,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
+                      ),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => DetailsDossierPage(
+                            dossier: fil[i],
+                            journals: widget.journals,
+                          ),
+                        ),
+                      ).then((_) => setState(() {})),
+                    ),
+                  ),
+                ),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'client-add',
+        backgroundColor: const Color(0xFF1A237E),
+        onPressed: _showAdd,
+        label: const Text(
+          "NOUVEAU DOSSIER",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        icon: const Icon(Icons.add, color: Colors.white),
+      ),
+    );
+  }
+
+  Future<void> _showAdd() async {
+    final dossier = await showDialog<TransitDossier>(
+      context: context,
+      builder: (context) => _DossierFormDialog(
+        clients: widget.clients,
+        prestataires: widget.prestataires,
+      ),
+    );
+    if (dossier != null && mounted) {
+      setState(() => widget.dossiers.add(dossier));
+    }
+  }
+}
+
+class _ContainerFormEntry {
+  final number = TextEditingController();
+  final cargo = TextEditingController();
+  String type = '40 pieds';
+
+  void dispose() {
+    number.dispose();
+    cargo.dispose();
+  }
+}
+
+class _DossierFormDialog extends StatefulWidget {
+  final List<Client> clients;
+  final List<Prestataire> prestataires;
+
+  const _DossierFormDialog({required this.clients, required this.prestataires});
+
+  @override
+  State<_DossierFormDialog> createState() => _DossierFormDialogState();
+}
+
+class _DossierFormDialogState extends State<_DossierFormDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _dossierNumber = TextEditingController(
+    text: 'STT-${DateFormat('yyMMdd-HHmm').format(DateTime.now())}',
+  );
+  final _billOfLading = TextEditingController();
+  final _transitaire = TextEditingController();
+  final _goodsType = TextEditingController();
+  final _goodsLocation = TextEditingController();
+  final _deliveryLocation = TextEditingController();
+  final _description = TextEditingController();
+  final List<_ContainerFormEntry> _containers = [];
+  Client? _selectedClient;
+  Prestataire? _selectedPrestataire;
+  DateTime _creationDate = DateTime.now();
+  DateTime? _arrivalDate;
+  String _billingType = 'Tarif complet';
+  String _priority = 'Priorité normale';
+
+  static const _primary = Color(0xFF1A237E);
+  static const _containerTypes = [
+    '20 pieds',
+    '40 pieds',
+    '40 pieds HC',
+    'Autre',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _containers.add(_ContainerFormEntry());
+  }
+
+  @override
+  void dispose() {
+    _dossierNumber.dispose();
+    _billOfLading.dispose();
+    _transitaire.dispose();
+    _goodsType.dispose();
+    _goodsLocation.dispose();
+    _deliveryLocation.dispose();
+    _description.dispose();
+    for (final container in _containers) {
+      container.dispose();
+    }
+    super.dispose();
+  }
+
+  String _formatDate(DateTime date) => DateFormat('dd/MM/yyyy').format(date);
+
+  String? _required(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Champ obligatoire';
+    }
+    return null;
+  }
+
+  Future<void> _pickDate({required bool arrival}) async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: arrival ? (_arrivalDate ?? now) : _creationDate,
+      firstDate: DateTime(now.year - 10),
+      lastDate: DateTime(now.year + 10),
+      helpText: arrival ? 'Date d’arrivée du bateau' : 'Date de création',
+      cancelText: 'Annuler',
+      confirmText: 'Choisir',
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      if (arrival) {
+        _arrivalDate = picked;
+      } else {
+        _creationDate = picked;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screen = MediaQuery.sizeOf(context);
+    final width = (screen.width - 32).clamp(320.0, 1000.0);
+    final height = (screen.height * 0.92).clamp(420.0, 900.0);
+    final fieldGap = 14.0;
+
+    return Dialog(
+      insetPadding: const EdgeInsets.all(16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 650;
+            final formContentWidth = constraints.maxWidth - 36;
+            final fieldWidth = compact
+                ? formContentWidth
+                : (formContentWidth - fieldGap) / 2;
+            return Column(
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: compact ? 18 : 26,
+                    vertical: 18,
+                  ),
+                  decoration: const BoxDecoration(
+                    color: _primary,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(22),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const CircleAvatar(
+                        backgroundColor: Colors.white24,
+                        child: Icon(
+                          Icons.folder_copy_rounded,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Nouveau dossier client',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 19,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(height: 3),
+                            Text(
+                              'Renseignez les informations du transit et des conteneurs',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Fermer',
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close, color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: Form(
+                    key: _formKey,
+                    child: ListView(
+                      padding: EdgeInsets.all(compact ? 18 : 26),
+                      children: [
+                        _formSection(
+                          icon: Icons.assignment_outlined,
+                          title: 'Informations du dossier',
+                          subtitle: 'Client, transitaire et références',
+                          children: [
+                            SizedBox(
+                              width: fieldWidth,
+                              child: SearchableDropdownFormField<Client>(
+                                key: const ValueKey('dossier-client-search'),
+                                options: widget.clients,
+                                value: _selectedClient,
+                                label: 'Client *',
+                                emptyText: 'Aucun client enregistré',
+                                displayString: (client) => client.nom,
+                                onChanged: (client) =>
+                                    setState(() => _selectedClient = client),
+                              ),
+                            ),
+                            _formText(
+                              width: fieldWidth,
+                              controller: _transitaire,
+                              label: 'Transitaire / chargeur',
+                              icon: Icons.business_outlined,
+                            ),
+                            SizedBox(
+                              width: fieldWidth,
+                              child: SearchableDropdownFormField<Prestataire>(
+                                key: const ValueKey('dossier-provider-search'),
+                                options: widget.prestataires,
+                                value: _selectedPrestataire,
+                                label: 'Prestataire affecté',
+                                emptyText: 'Aucun prestataire enregistré',
+                                required: false,
+                                displayString: (provider) =>
+                                    '${provider.entreprise} • ${provider.villePort}',
+                                onChanged: (provider) => setState(
+                                  () => _selectedPrestataire = provider,
+                                ),
+                              ),
+                            ),
+                            _formText(
+                              width: fieldWidth,
+                              controller: _dossierNumber,
+                              label: 'Numéro de dossier *',
+                              icon: Icons.tag_rounded,
+                              validator: _required,
+                            ),
+                            _formText(
+                              width: fieldWidth,
+                              controller: _billOfLading,
+                              label: 'N° BL (connaissement)',
+                              icon: Icons.article_outlined,
+                            ),
+                            _dateField(
+                              width: fieldWidth,
+                              label: 'Date de création',
+                              value: _formatDate(_creationDate),
+                              onTap: () => _pickDate(arrival: false),
+                            ),
+                            SizedBox(
+                              width: fieldWidth,
+                              child: DropdownButtonFormField<String>(
+                                isExpanded: true,
+                                initialValue: _billingType,
+                                decoration: _fieldDecoration(
+                                  'Type de facturation',
+                                  Icons.receipt_long_outlined,
+                                ),
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: 'Tarif complet',
+                                    child: Text('Tarif complet'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'Tarif partiel',
+                                    child: Text('Tarif partiel'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'À définir',
+                                    child: Text('À définir'),
+                                  ),
+                                ],
+                                onChanged: (value) {
+                                  if (value != null) {
+                                    setState(() => _billingType = value);
+                                  }
+                                },
+                              ),
+                            ),
+                            SizedBox(
+                              width: fieldWidth,
+                              child: DropdownButtonFormField<String>(
+                                isExpanded: true,
+                                initialValue: _priority,
+                                decoration: _fieldDecoration(
+                                  'Type de priorité',
+                                  Icons.flag_outlined,
+                                ),
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: 'Priorité normale',
+                                    child: Text('Priorité normale'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'Priorité élevée',
+                                    child: Text('Priorité élevée'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'Urgent',
+                                    child: Text('Urgent'),
+                                  ),
+                                ],
+                                onChanged: (value) {
+                                  if (value != null) {
+                                    setState(() => _priority = value);
+                                  }
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 22),
+                        _formSection(
+                          icon: Icons.inventory_2_outlined,
+                          title: 'Marchandise et itinéraire',
+                          subtitle: 'Informations logistiques et arrivée',
+                          children: [
+                            _formText(
+                              width: fieldWidth,
+                              controller: _goodsType,
+                              label: 'Type de marchandise',
+                              icon: Icons.category_outlined,
+                            ),
+                            _formText(
+                              width: fieldWidth,
+                              controller: _goodsLocation,
+                              label: 'Lieu de la marchandise',
+                              icon: Icons.location_on_outlined,
+                            ),
+                            _formText(
+                              width: fieldWidth,
+                              controller: _deliveryLocation,
+                              label: 'Lieu de livraison',
+                              icon: Icons.flag_circle_outlined,
+                            ),
+                            _dateField(
+                              width: fieldWidth,
+                              label: 'Date d’arrivée du bateau',
+                              value: _arrivalDate == null
+                                  ? ''
+                                  : _formatDate(_arrivalDate!),
+                              placeholder: 'Sélectionner une date',
+                              onTap: () => _pickDate(arrival: true),
+                            ),
+                            _formText(
+                              width: formContentWidth,
+                              controller: _description,
+                              label: 'Description / instructions',
+                              icon: Icons.notes_rounded,
+                              maxLines: 3,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 22),
+                        Wrap(
+                          alignment: WrapAlignment.spaceBetween,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          runSpacing: 8,
+                          children: [
+                            const SizedBox(
+                              width: 260,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Liste des conteneurs',
+                                    style: TextStyle(
+                                      color: Color(0xFF172B4D),
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  SizedBox(height: 3),
+                                  Text(
+                                    'Ajoutez les références et le type de chaque conteneur',
+                                    style: TextStyle(
+                                      color: Color(0xFF718096),
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            TextButton.icon(
+                              onPressed: () => setState(
+                                () => _containers.add(_ContainerFormEntry()),
+                              ),
+                              icon: const Icon(Icons.add),
+                              label: const Text('Ajouter'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        if (_containers.isEmpty)
+                          Container(
+                            padding: const EdgeInsets.all(18),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF5F7FB),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: const Text(
+                              'Aucun conteneur ajouté. Utilisez « Ajouter » pour en saisir un.',
+                              style: TextStyle(color: Color(0xFF718096)),
+                            ),
+                          ),
+                        ...List.generate(_containers.length, (index) {
+                          final container = _containers[index];
+                          return _buildContainerRow(
+                            container,
+                            index,
+                            compact: compact,
+                          );
+                        }),
+                        if (widget.clients.isEmpty) ...[
+                          const SizedBox(height: 14),
+                          const Text(
+                            'Aucun client n’est encore enregistré. Ajoutez d’abord un client dans Transitaire > Clients pour créer son dossier.',
+                            style: TextStyle(
+                              color: Color(0xFFB45309),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 22,
+                    vertical: 14,
+                  ),
+                  child: Wrap(
+                    alignment: WrapAlignment.end,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 10,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Annuler'),
+                      ),
+                      FilledButton.icon(
+                        onPressed: _save,
+                        icon: const Icon(Icons.check_rounded),
+                        label: const Text('Créer le dossier'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 14,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _formSection({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required List<Widget> children,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE6EBF2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: _primary, size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Color(0xFF172B4D),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: Color(0xFF718096),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Wrap(spacing: 14, runSpacing: 14, children: children),
+        ],
+      ),
+    );
+  }
+
+  InputDecoration _fieldDecoration(String label, IconData icon) {
+    return InputDecoration(
+      labelText: label,
+      prefixIcon: Icon(icon, size: 20),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFFDCE3EC)),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+    );
+  }
+
+  Widget _formText({
+    required double width,
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    String? Function(String?)? validator,
+    int maxLines = 1,
+  }) {
+    return SizedBox(
+      width: width,
+      child: TextFormField(
+        controller: controller,
+        validator: validator,
+        maxLines: maxLines,
+        decoration: _fieldDecoration(label, icon),
+      ),
+    );
+  }
+
+  Widget _dateField({
+    required double width,
+    required String label,
+    required String value,
+    required VoidCallback onTap,
+    String placeholder = 'Sélectionner une date',
+  }) {
+    return SizedBox(
+      width: width,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: InputDecorator(
+          decoration: _fieldDecoration(label, Icons.calendar_month_rounded),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  value.isEmpty ? placeholder : value,
+                  style: TextStyle(
+                    color: value.isEmpty
+                        ? const Color(0xFF718096)
+                        : const Color(0xFF172B4D),
+                  ),
+                ),
+              ),
+              const Icon(Icons.arrow_drop_down, color: Color(0xFF718096)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContainerRow(
+    _ContainerFormEntry container,
+    int index, {
+    required bool compact,
+  }) {
+    return Container(
+      key: ValueKey('container-row-$index'),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F9FC),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE6EBF2)),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final narrow = compact || constraints.maxWidth < 560;
+          final inputWidth = narrow
+              ? constraints.maxWidth
+              : (constraints.maxWidth - 100) / 3;
+          final inputs = [
+            SizedBox(
+              width: inputWidth,
+              child: TextFormField(
+                key: ValueKey('container-number-$index'),
+                controller: container.number,
+                decoration: _fieldDecoration(
+                  'Numéro conteneur',
+                  Icons.tag_rounded,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: inputWidth,
+              child: DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: container.type,
+                decoration: _fieldDecoration(
+                  'Type de conteneur',
+                  Icons.inventory_2_outlined,
+                ),
+                items: _containerTypes
+                    .map(
+                      (type) =>
+                          DropdownMenuItem(value: type, child: Text(type)),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null) setState(() => container.type = value);
+                },
+              ),
+            ),
+            SizedBox(
+              width: inputWidth,
+              child: TextFormField(
+                controller: container.cargo,
+                decoration: _fieldDecoration(
+                  'Marchandise',
+                  Icons.inventory_outlined,
+                ),
+              ),
+            ),
+          ];
+          return Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              ...inputs,
+              IconButton(
+                tooltip: 'Supprimer ce conteneur',
+                onPressed: () => setState(() {
+                  _containers.removeAt(index);
+                  container.dispose();
+                }),
+                icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _save() {
+    if (!_formKey.currentState!.validate()) return;
+    final client = _selectedClient;
+    if (client == null) return;
+
+    final containers = _containers
+        .where(
+          (container) =>
+              container.number.text.trim().isNotEmpty ||
+              container.cargo.text.trim().isNotEmpty,
+        )
+        .map(
+          (container) => TransitContainer(
+            numero: container.number.text.trim(),
+            type: container.type,
+            marchandise: container.cargo.text.trim(),
+          ),
+        )
+        .toList();
+
+    Navigator.pop(
+      context,
+      TransitDossier(
+        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        numDossier: _dossierNumber.text.trim(),
+        numBL: _billOfLading.text.trim(),
+        numLB: '',
+        client: client,
+        nbConteneurs: containers.length,
+        dateDebut: _formatDate(_creationDate),
+        transitaire: _transitaire.text.trim(),
+        prestataire: _selectedPrestataire,
+        dateCreation: _formatDate(_creationDate),
+        typeFacturation: _billingType,
+        priorite: _priority,
+        typeMarchandise: _goodsType.text.trim(),
+        lieuMarchandise: _goodsLocation.text.trim(),
+        lieuLivraison: _deliveryLocation.text.trim(),
+        dateArriveeBateau: _arrivalDate == null
+            ? ''
+            : _formatDate(_arrivalDate!),
+        description: _description.text.trim(),
+        conteneurs: containers,
+      ),
+    );
+  }
+}
+
+// --- PAGE CLIENTS ---
+
+class ClientsPage extends StatefulWidget {
+  final List<Client> clients;
+  final List<PlanAccount> comptes;
+
+  const ClientsPage({super.key, required this.clients, required this.comptes});
+  @override
+  State<ClientsPage> createState() => _ClientsPageState();
+}
+
+class _ClientsPageState extends State<ClientsPage> {
+  String q = "";
+
+  @override
+  Widget build(BuildContext context) {
+    final fil = widget.clients
+        .where((c) => c.nom.toLowerCase().contains(q.toLowerCase()))
+        .toList();
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FD),
+      appBar: AppBar(
+        title: const Text(
+          "Portefeuille Clients",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: const Color(0xFF1A237E),
+        foregroundColor: Colors.white,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(80),
+          child: Center(
+            child: Container(
+              width: 800,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: TextField(
+                onChanged: (v) => setState(() => q = v),
+                decoration: InputDecoration(
+                  hintText: "Rechercher un client...",
+                  prefixIcon: const Icon(Icons.search),
+                  fillColor: Colors.white,
+                  filled: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      body: Center(
+        child: Container(
+          width: 800,
+          child: ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: fil.length,
+            itemBuilder: (context, i) => Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(15),
+              ),
+              margin: const EdgeInsets.only(bottom: 10),
+              child: ListTile(
+                leading: const CircleAvatar(
+                  backgroundColor: Color(0xFFE8EAF6),
+                  child: Icon(Icons.person, color: Color(0xFF1A237E)),
+                ),
+                title: Text(
+                  fil[i].nom,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Text(
+                  '${fil[i].telephone}\nCompte client : ${fil[i].compteComptable}',
+                ),
+                isThreeLine: true,
+                trailing: IconButton(
+                  key: ValueKey('edit-client-${fil[i].id}'),
+                  tooltip: 'Modifier le client',
+                  onPressed: () => _openClientForm(fil[i]),
+                  icon: const Icon(Icons.edit_outlined),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        heroTag: 'legacy-client-add',
+        backgroundColor: const Color(0xFF1A237E),
+        onPressed: _showAdd,
+        child: const Icon(Icons.person_add_alt_1_rounded, color: Colors.white),
+      ),
+    );
+  }
+
+  Future<void> _showAdd() => _openClientForm();
+
+  Future<void> _openClientForm([Client? initial]) async {
+    final client = await showDialog<Client>(
+      context: context,
+      builder: (context) => _ClientFormDialog(
+        clients: widget.clients,
+        comptes: widget.comptes,
+        initial: initial,
+      ),
+    );
+    if (client != null && mounted) {
+      setState(() {
+        final index = widget.clients.indexWhere((item) => item.id == client.id);
+        if (index < 0) {
+          widget.clients.add(client);
+        } else {
+          widget.clients[index] = client;
+        }
+      });
+    }
+  }
+}
+
+class _ClientFormDialog extends StatefulWidget {
+  final List<Client> clients;
+  final List<PlanAccount> comptes;
+  final Client? initial;
+
+  const _ClientFormDialog({
+    required this.clients,
+    required this.comptes,
+    this.initial,
+  });
+
+  @override
+  State<_ClientFormDialog> createState() => _ClientFormDialogState();
+}
+
+class _ClientFormDialogState extends State<_ClientFormDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _name = TextEditingController();
+  final _company = TextEditingController();
+  final _phone = TextEditingController();
+  final _address = TextEditingController();
+  final _email = TextEditingController();
+  final _rccm = TextEditingController();
+  final _openingBalance = TextEditingController(text: '0');
+  PlanAccount? _selectedAccount;
+  bool _vat = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final client = widget.initial;
+    if (client == null) return;
+    _name.text = client.nom;
+    _company.text = client.societe;
+    _phone.text = client.telephone;
+    _address.text = client.adresse;
+    _email.text = client.email;
+    _rccm.text = client.rccm;
+    _openingBalance.text = client.soldeInitial.toString();
+    _vat = client.assujettiTva;
+    for (final account in widget.comptes) {
+      if (account.code == client.compteComptable) {
+        _selectedAccount = account;
+        break;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _company.dispose();
+    _phone.dispose();
+    _address.dispose();
+    _email.dispose();
+    _rccm.dispose();
+    _openingBalance.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(
+        widget.initial == null ? 'Ajouter un client' : 'Modifier le client',
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      content: SizedBox(
+        width: 540,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _textField(_name, 'Nom *', required: true),
+                _textField(_company, 'Société'),
+                _textField(
+                  _phone,
+                  'Téléphone *',
+                  required: true,
+                  keyboardType: TextInputType.phone,
+                ),
+                _textField(_address, 'Adresse', maxLines: 2),
+                _textField(
+                  _email,
+                  'Boîte mail',
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                _textField(_rccm, 'RCCM'),
+                _textField(
+                  _openingBalance,
+                  'Solde initial client (FCFA)',
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  amount: true,
+                ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _vat,
+                  title: const Text('Assujetti à la TVA'),
+                  onChanged: (value) => setState(() => _vat = value ?? false),
+                ),
+                SearchableDropdownFormField<PlanAccount>(
+                  key: const ValueKey('client-account-picker'),
+                  options: widget.comptes
+                      .where(
+                        (account) =>
+                            account.nature == 'Client' &&
+                            (account.tiersId == null ||
+                                account.tiersId == _selectedAccount?.tiersId),
+                      )
+                      .toList(),
+                  value: _selectedAccount,
+                  label: 'Compte comptable client *',
+                  emptyText: 'Aucun compte de nature Client dans le plan',
+                  displayString: (account) =>
+                      '${account.code} • ${account.libelle}',
+                  onChanged: (account) =>
+                      setState(() => _selectedAccount = account),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text("Annuler"),
+        ),
+        FilledButton.icon(
+          onPressed: _save,
+          icon: const Icon(Icons.check),
+          label: Text(
+            widget.initial == null
+                ? 'Valider'
+                : 'Enregistrer les modifications',
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _textField(
+    TextEditingController controller,
+    String label, {
+    bool required = false,
+    bool amount = false,
+    TextInputType? keyboardType,
+    int maxLines = 1,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextFormField(
+        controller: controller,
+        keyboardType: keyboardType,
+        maxLines: maxLines,
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+        ),
+        validator: (value) {
+          if (required && (value == null || value.trim().isEmpty)) {
+            return 'Ce champ est obligatoire';
+          }
+          if (amount) {
+            final parsed = double.tryParse(
+              (value ?? '').trim().replaceAll(' ', '').replaceAll(',', '.'),
+            );
+            if (parsed == null || parsed < 0) {
+              return 'Saisissez un solde égal ou supérieur à zéro';
+            }
+          }
+          return null;
+        },
+      ),
+    );
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    final account = _selectedAccount;
+    if (account == null) {
+      _showMessage('Sélectionnez un compte client existant.');
+      return;
+    }
+    final clientName = _name.text.trim();
+    final rccm = _rccm.text.trim();
+    final duplicate = widget.clients.any(
+      (client) =>
+          client.id != widget.initial?.id &&
+          (_normalizeUniqueValue(client.nom) ==
+                  _normalizeUniqueValue(clientName) ||
+              (rccm.isNotEmpty &&
+                  _normalizeUniqueValue(client.rccm) ==
+                      _normalizeUniqueValue(rccm))),
+    );
+    if (duplicate) {
+      await _showDuplicateAlert(context, 'Ce client');
+      return;
+    }
+    final id =
+        widget.initial?.id ?? DateTime.now().microsecondsSinceEpoch.toString();
+    final openingBalance = double.parse(
+      _openingBalance.text.trim().replaceAll(' ', '').replaceAll(',', '.'),
+    );
+    if (_selectedAccount != null &&
+        widget.initial != null &&
+        widget.initial!.compteComptable != account.code) {
+      for (final previousAccount in widget.comptes) {
+        if (previousAccount.code == widget.initial!.compteComptable &&
+            previousAccount.tiersId == id) {
+          previousAccount.tiersId = null;
+          break;
+        }
+      }
+    }
+    account.tiersId ??= id;
+    Navigator.pop(
+      context,
+      Client(
+        id: id,
+        nom: clientName,
+        telephone: _phone.text.trim(),
+        societe: _company.text.trim(),
+        adresse: _address.text.trim(),
+        email: _email.text.trim(),
+        rccm: _rccm.text.trim(),
+        soldeInitial: openingBalance,
+        assujettiTva: _vat,
+        compteComptable: account.code,
+      ),
+    );
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+}
+
+// --- PAGE HISTORIQUE ---
+
+class HistoryPage extends StatefulWidget {
+  final List<TransitDossier> dossiers;
+  const HistoryPage({super.key, required this.dossiers});
+  @override
+  State<HistoryPage> createState() => _HistoryPageState();
+}
+
+class _HistoryPageState extends State<HistoryPage> {
+  String q = "";
+  @override
+  Widget build(BuildContext context) {
+    Map<String, List<TransitDossier>> grouped = {};
+    for (var d in widget.dossiers) {
+      if (d.client.nom.toLowerCase().contains(q.toLowerCase()) ||
+          d.numDossier.contains(q)) {
+        grouped.putIfAbsent(d.client.nom, () => []).add(d);
+      }
+    }
+    final names = grouped.keys.toList();
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FD),
+      appBar: AppBar(
+        title: const Text(
+          "Analyse & Rapports",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: const Color(0xFF1A237E),
+        foregroundColor: Colors.white,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(80),
+          child: Center(
+            child: Container(
+              width: 800,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: TextField(
+                onChanged: (v) => setState(() => q = v),
+                decoration: InputDecoration(
+                  hintText: "Filtrer par Client ou Dossier...",
+                  prefixIcon: const Icon(Icons.analytics_rounded),
+                  fillColor: Colors.white,
+                  filled: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      body: Center(
+        child: Container(
+          width: 800,
+          child: ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: names.length,
+            itemBuilder: (context, index) {
+              final name = names[index];
+              final clDs = grouped[name]!;
+              double tot = clDs.fold(0, (s, d) => s + d.totalDepenses);
+              return Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                margin: const EdgeInsets.only(bottom: 12),
+                child: ExpansionTile(
+                  leading: const CircleAvatar(
+                    backgroundColor: Color(0xFFE8EAF6),
+                    child: Icon(
+                      Icons.account_balance_wallet_rounded,
+                      color: Color(0xFF1A237E),
+                    ),
+                  ),
+                  title: Text(
+                    name,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text("Cumul total : ${formatCurrency(tot)} F"),
+                  children: clDs
+                      .map(
+                        (d) => ExpansionTile(
+                          title: Text("Dossier: ${d.numDossier}"),
+                          subtitle: Text(
+                            "Total: ${formatCurrency(d.totalDepenses)} F",
+                          ),
+                          children: d.depenses
+                              .map(
+                                (exp) => ListTile(
+                                  dense: true,
+                                  title: Text(exp.titre),
+                                  subtitle: Text(exp.date),
+                                  trailing: Text(
+                                    "-${formatCurrency(exp.montant)} F",
+                                    style: const TextStyle(
+                                      color: Colors.redAccent,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                        ),
+                      )
+                      .toList(),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// --- PAGE DÉTAILS ---
+
+class DetailsDossierPage extends StatefulWidget {
+  final TransitDossier dossier;
+  final List<JournalCode> journals;
+  const DetailsDossierPage({
+    super.key,
+    required this.dossier,
+    this.journals = const [],
+  });
+  @override
+  State<DetailsDossierPage> createState() => _DetailsDossierPageState();
+}
+
+class _DetailsDossierPageState extends State<DetailsDossierPage> {
+  Future<void> _pdf() async {
+    final pdf = pw.Document();
+    pdf.addPage(
+      pw.Page(
+        build: (c) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Header(
+              level: 0,
+              text:
+                  "SYLLA TRANSIT - RAPPORT DOSSIER ${widget.dossier.numDossier}",
+            ),
+            pw.Text("Client: ${widget.dossier.client.nom}"),
+            if (widget.dossier.prestataire != null)
+              pw.Text(
+                "Prestataire affecté: ${widget.dossier.prestataire!.entreprise}",
+              ),
+            pw.Text(
+              "BL: ${widget.dossier.numBL} | LB: ${widget.dossier.numLB}",
+            ),
+            pw.SizedBox(height: 20),
+            pw.Text(
+              "Facture Client ${widget.dossier.factureClient.reference} — ${widget.dossier.factureClient.statut}: ${formatCurrency(widget.dossier.factureClient.montant)} FCFA",
+            ),
+            pw.Text(
+              "Facture Prestataire ${widget.dossier.facturePrestataire.reference} — ${widget.dossier.facturePrestataire.statut}: ${formatCurrency(widget.dossier.facturePrestataire.montant)} FCFA",
+            ),
+            pw.Text(
+              "Compte client — facturé: ${formatCurrency(widget.dossier.totalFacturesClient)} FCFA, réglé: ${formatCurrency(widget.dossier.totalReglementsClient)} FCFA, solde: ${formatCurrency(widget.dossier.soldeClient)} FCFA",
+            ),
+            if (widget.dossier.prestataire != null)
+              pw.Text(
+                "Compte prestataire — facturé: ${formatCurrency(widget.dossier.totalFacturesPrestataire)} FCFA, avances: ${formatCurrency(widget.dossier.totalAvancesPrestataire)} FCFA, payé: ${formatCurrency(widget.dossier.totalReglementsPrestataire)} FCFA, solde: ${formatCurrency(widget.dossier.soldePrestataire)} FCFA",
+              ),
+            pw.SizedBox(height: 12),
+            pw.Text("Historique des opérations"),
+            pw.Table.fromTextArray(
+              headers: ['Date', 'Opération', 'Détail', 'Montant'],
+              data: widget.dossier.operations
+                  .map(
+                    (entry) => [
+                      entry.date,
+                      _operationLabel(entry.type),
+                      entry.titre,
+                      formatCurrency(entry.montant),
+                    ],
+                  )
+                  .toList(),
+            ),
+            pw.SizedBox(height: 20),
+            pw.Table.fromTextArray(
+              headers: ['Date', 'Frais du dossier', 'Catégorie', 'Montant'],
+              data: widget.dossier.depenses
+                  .map(
+                    (e) => [
+                      e.date,
+                      e.titre,
+                      e.categorie,
+                      formatCurrency(e.montant),
+                    ],
+                  )
+                  .toList(),
+            ),
+            pw.Divider(),
+            pw.Align(
+              alignment: pw.Alignment.centerRight,
+              child: pw.Text(
+                "TOTAL DES DÉPENSES: ${formatCurrency(widget.dossier.totalDepenses)} FCFA",
+                style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    await Printing.layoutPdf(onLayout: (f) async => pdf.save());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FD),
+      appBar: AppBar(
+        title: Text(
+          "Détails Dossier ${widget.dossier.numDossier}",
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: const Color(0xFF1A237E),
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(icon: const Icon(Icons.picture_as_pdf), onPressed: _pdf),
+          if (widget.dossier.statut == 'Clôturé')
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 14),
+              child: Chip(label: Text('Clôturé')),
+            ),
+        ],
+      ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1000),
+          child: Column(
+            children: [
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1A237E),
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Column(
+                  children: [
+                    const Text(
+                      'DÉPENSES DU DOSSIER',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${formatCurrency(widget.dossier.totalDepenses)} FCFA',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 10,
+                      runSpacing: 8,
+                      children: [
+                        Chip(
+                          avatar: const Icon(
+                            Icons.person_outline,
+                            color: Colors.white,
+                          ),
+                          label: Text(
+                            'Client : ${widget.dossier.client.nom}',
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          backgroundColor: Colors.white24,
+                        ),
+                        Chip(
+                          avatar: const Icon(
+                            Icons.local_shipping_outlined,
+                            color: Colors.white,
+                          ),
+                          label: Text(
+                            'Prestataire : ${widget.dossier.prestataire?.entreprise ?? 'Non affecté'}',
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          backgroundColor: Colors.white24,
+                        ),
+                        Chip(
+                          label: Text(
+                            'BL : ${widget.dossier.numBL.isEmpty ? 'Non renseigné' : widget.dossier.numBL}',
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          backgroundColor: Colors.white24,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    Wrap(
+                      spacing: 14,
+                      runSpacing: 14,
+                      children: [
+                        _balanceCard(
+                          title: 'Compte client',
+                          amountLabel: 'Facturé',
+                          amount: widget.dossier.totalFacturesClient,
+                          secondLabel: 'Réglé',
+                          secondAmount: widget.dossier.totalReglementsClient,
+                          balance: widget.dossier.soldeClient,
+                          icon: Icons.receipt_long_rounded,
+                          color: const Color(0xFF1565C0),
+                        ),
+                        if (widget.dossier.prestataire != null)
+                          _balanceCard(
+                            title: 'Compte prestataire',
+                            amountLabel: 'Facturé',
+                            amount: widget.dossier.totalFacturesPrestataire,
+                            secondLabel: 'Avances + paiements',
+                            secondAmount:
+                                widget.dossier.totalAvancesPrestataire +
+                                widget.dossier.totalReglementsPrestataire,
+                            balance: widget.dossier.soldePrestataire,
+                            icon: Icons.local_shipping_rounded,
+                            color: const Color(0xFF6A1B9A),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Clôture du dossier',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(_closureMessage()),
+                            const SizedBox(height: 10),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: FilledButton.icon(
+                                onPressed: widget.dossier.peutCloturer
+                                    ? _closeDossier
+                                    : null,
+                                icon: const Icon(Icons.lock_outline_rounded),
+                                label: const Text('Clôturer le dossier'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      'Historique des frais et mouvements',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _invoiceTile(
+                      widget.dossier.factureClient,
+                      widget.dossier.client.nom,
+                    ),
+                    _invoiceTile(
+                      widget.dossier.facturePrestataire,
+                      widget.dossier.prestataire?.entreprise ??
+                          'Prestataire non affecté',
+                    ),
+                    _invoiceTile(
+                      widget.dossier.factureTransitaire,
+                      widget.dossier.transitaireAffecte?.entreprise ??
+                          (widget.dossier.prestataire?.type == 'Transitaire'
+                              ? widget.dossier.prestataire!.entreprise
+                              : 'Transitaire non affecté'),
+                    ),
+                    _invoiceTile(
+                      widget.dossier.factureTransporteur,
+                      widget.dossier.transporteurAffecte?.entreprise ??
+                          (widget.dossier.prestataire?.type == 'Transporteur'
+                              ? widget.dossier.prestataire!.entreprise
+                              : 'Transporteur non affecté'),
+                    ),
+                    if (widget.dossier.operations.isEmpty &&
+                        widget.dossier.depenses.isEmpty)
+                      const Card(
+                        child: Padding(
+                          padding: EdgeInsets.all(20),
+                          child: Text(
+                            'Aucun frais, facture, règlement ou avance enregistré pour ce dossier.',
+                          ),
+                        ),
+                      ),
+                    ...widget.dossier.operations.map(_operationTile),
+                    ...widget.dossier.depenses.map(_expenseTile),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      floatingActionButton: widget.dossier.statut == 'Clôturé'
+          ? null
+          : FloatingActionButton.extended(
+              heroTag: 'dossier-operation-add-${widget.dossier.id}',
+              key: const ValueKey('add-dossier-operation'),
+              backgroundColor: const Color(0xFF1A237E),
+              onPressed: _addOperation,
+              label: const Text(
+                'AJOUTER UN FRAIS / MOUVEMENT',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              icon: const Icon(Icons.add, color: Colors.white),
+            ),
+    );
+  }
+
+  Widget _balanceCard({
+    required String title,
+    required String amountLabel,
+    required double amount,
+    required String secondLabel,
+    required double secondAmount,
+    required double balance,
+    required IconData icon,
+    required Color color,
+  }) {
+    return SizedBox(
+      width: (MediaQuery.sizeOf(context).width - 32).clamp(280.0, 460.0),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, color: color),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              _moneyLine(amountLabel, amount),
+              _moneyLine(secondLabel, secondAmount),
+              const Divider(height: 20),
+              _moneyLine(
+                'Solde à payer',
+                balance,
+                bold: true,
+                color: balance > 0 ? Colors.redAccent : Colors.green.shade700,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _moneyLine(
+    String label,
+    double amount, {
+    bool bold = false,
+    Color? color,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Expanded(child: Text(label)),
+          Text(
+            '${formatCurrency(amount)} FCFA',
+            style: TextStyle(
+              fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _operationTile(DossierOperation entry) {
+    final isCredit =
+        entry.type == DossierOperationType.clientPayment ||
+        entry.type == DossierOperationType.providerAdvance ||
+        entry.type == DossierOperationType.providerPayment;
+    return Card(
+      child: ListTile(
+        leading: Icon(
+          _operationIcon(entry.type),
+          color: isCredit ? Colors.green.shade700 : const Color(0xFF1A237E),
+        ),
+        title: Text(
+          entry.titre,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text('${_operationLabel(entry.type)} • ${entry.date}'),
+        trailing: Text(
+          '${isCredit ? '-' : '+'}${formatCurrency(entry.montant)} F',
+          style: TextStyle(
+            color: isCredit ? Colors.green.shade700 : const Color(0xFF1A237E),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _invoiceTile(DossierInvoice invoice, String recipient) {
+    final (title, icon, color) = switch (invoice.kind) {
+      DossierInvoiceKind.client => (
+        'Facture Client',
+        Icons.request_quote_rounded,
+        const Color(0xFF1565C0),
+      ),
+      DossierInvoiceKind.provider => (
+        'Facture Prestataire',
+        Icons.receipt_long_rounded,
+        const Color(0xFF6A1B9A),
+      ),
+      DossierInvoiceKind.forwarder => (
+        'Facture Transitaire',
+        Icons.directions_boat_rounded,
+        const Color(0xFF00695C),
+      ),
+      DossierInvoiceKind.carrier => (
+        'Facture Transporteur',
+        Icons.local_shipping_rounded,
+        const Color(0xFFEF6C00),
+      ),
+    };
+    return Card(
+      child: ListTile(
+        leading: Icon(icon, color: color),
+        title: Text(
+          '$title • ${invoice.reference}',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text(
+          '$recipient • ${invoice.description.isEmpty ? 'Brouillon à compléter' : invoice.description} • ${invoice.statut}',
+        ),
+        trailing: Text('${formatCurrency(invoice.montant)} F'),
+      ),
+    );
+  }
+
+  Widget _expenseTile(Depense expense) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(
+          Icons.receipt_long_rounded,
+          color: Colors.redAccent,
+        ),
+        title: Text(
+          expense.titre,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text('Dépense ${expense.categorie} • ${expense.date}'),
+        trailing: Text(
+          '-${formatCurrency(expense.montant)} F',
+          style: const TextStyle(
+            color: Colors.redAccent,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _closureMessage() {
+    if (widget.dossier.statut == 'Clôturé') {
+      return 'Dossier clôturé le ${widget.dossier.dateFin}.';
+    }
+    if (widget.dossier.prestataire == null) {
+      return 'Clôture impossible : affectez d’abord un prestataire et complétez sa facture.';
+    }
+    if (widget.dossier.factureClient.statut != 'Clôturée') {
+      return 'Clôture impossible : complétez et clôturez la Facture Client.';
+    }
+    final providerInvoice = switch (widget.dossier.prestataire!.type) {
+      'Transitaire' => widget.dossier.factureTransitaire,
+      'Transporteur' => widget.dossier.factureTransporteur,
+      _ => widget.dossier.facturePrestataire,
+    };
+    if (providerInvoice.statut != 'Clôturée') {
+      final invoiceName = switch (providerInvoice.kind) {
+        DossierInvoiceKind.client => 'Facture Client',
+        DossierInvoiceKind.provider => 'Facture Prestataire',
+        DossierInvoiceKind.forwarder => 'Facture Transitaire',
+        DossierInvoiceKind.carrier => 'Facture Transporteur',
+      };
+      return 'Clôture impossible : complétez et clôturez la $invoiceName.';
+    }
+    if (widget.dossier.soldeClient > 0) {
+      return 'Clôture impossible : le client doit encore ${formatCurrency(widget.dossier.soldeClient)} FCFA.';
+    }
+    if (widget.dossier.soldePrestataire > 0) {
+      return 'Clôture impossible : il reste ${formatCurrency(widget.dossier.soldePrestataire)} FCFA à payer au prestataire.';
+    }
+    return 'Les comptes client et prestataire sont soldés. Le dossier peut être clôturé.';
+  }
+
+  Future<void> _closeDossier() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clôturer le dossier ?'),
+        content: const Text(
+          'Les comptes sont soldés. Une fois clôturé, aucun nouveau frais ou mouvement ne pourra être ajouté.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Confirmer la clôture'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted && widget.dossier.peutCloturer) {
+      setState(() {
+        widget.dossier
+          ..statut = 'Clôturé'
+          ..dateFin = DateFormat('dd/MM/yyyy').format(DateTime.now());
+      });
+    }
+  }
+
+  Future<void> _addOperation() async {
+    if (widget.dossier.statut == 'Clôturé') return;
+    final entry = await showDialog<DossierOperation>(
+      context: context,
+      builder: (context) => _DossierOperationDialog(
+        hasProvider: widget.dossier.prestataire != null,
+        journals: widget.journals,
+      ),
+    );
+    if (entry == null || !mounted) return;
+
+    setState(() {
+      if (entry.type == DossierOperationType.expense) {
+        widget.dossier.depenses.add(
+          Depense(
+            titre: entry.titre,
+            montant: entry.montant,
+            categorie: entry.categorie,
+            date: entry.date,
+          ),
+        );
+      } else {
+        widget.dossier.operations.add(entry);
+      }
+    });
+  }
+}
+
+class _DossierOperationDialog extends StatefulWidget {
+  final bool hasProvider;
+  final List<JournalCode> journals;
+
+  const _DossierOperationDialog({
+    required this.hasProvider,
+    required this.journals,
+  });
+
+  @override
+  State<_DossierOperationDialog> createState() =>
+      _DossierOperationDialogState();
+}
+
+class _DossierOperationDialogState extends State<_DossierOperationDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _titleController = TextEditingController();
+  final _amountController = TextEditingController();
+  DossierOperationType _type = DossierOperationType.expense;
+  String _expenseCategory = 'Douane';
+  JournalCode? _journal;
+  static const _expenseCategories = [
+    'Douane',
+    'Chauffeur',
+    'Escorte',
+    'Carburant',
+    'Autre',
+  ];
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _amountController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final types = [
+      DossierOperationType.expense,
+      DossierOperationType.clientPayment,
+      if (widget.hasProvider) ...[
+        DossierOperationType.providerAdvance,
+        DossierOperationType.providerPayment,
+      ],
+    ];
+    return AlertDialog(
+      title: const Text('Nouvelle opération du dossier'),
+      content: SizedBox(
+        width: 440,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<DossierOperationType>(
+                  initialValue: _type,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Type d’opération',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: types
+                      .map(
+                        (type) => DropdownMenuItem(
+                          value: type,
+                          child: Text(_operationLabel(type)),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) setState(() => _type = value);
+                  },
+                ),
+                if (_type == DossierOperationType.expense) ...[
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    initialValue: _expenseCategory,
+                    decoration: const InputDecoration(
+                      labelText: 'Catégorie du frais',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: _expenseCategories
+                        .map(
+                          (category) => DropdownMenuItem(
+                            value: category,
+                            child: Text(category),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() => _expenseCategory = value);
+                      }
+                    },
+                  ),
+                ],
+                if (widget.journals.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<JournalCode?>(
+                    key: const ValueKey('operation-journal'),
+                    initialValue: _journal,
+                    decoration: const InputDecoration(
+                      labelText: 'Code journal de caisse',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: [
+                      const DropdownMenuItem<JournalCode?>(
+                        value: null,
+                        child: Text('Tous / non affecté'),
+                      ),
+                      ...widget.journals.map(
+                        (journal) => DropdownMenuItem<JournalCode?>(
+                          value: journal,
+                          child: Text('${journal.code} • ${journal.intitule}'),
+                        ),
+                      ),
+                    ],
+                    onChanged: (journal) => setState(() => _journal = journal),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: _titleController,
+                  decoration: InputDecoration(
+                    labelText: _type == DossierOperationType.expense
+                        ? 'Description du frais'
+                        : 'Référence / description',
+                    border: const OutlineInputBorder(),
+                  ),
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'Ce champ est obligatoire'
+                      : null,
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: _amountController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Montant',
+                    suffixText: 'FCFA',
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (value) {
+                    final amount = double.tryParse(
+                      (value ?? '').replaceAll(' ', '').replaceAll(',', '.'),
+                    );
+                    if (amount == null || amount <= 0) {
+                      return 'Saisissez un montant supérieur à zéro';
+                    }
+                    return null;
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Annuler'),
+        ),
+        FilledButton(onPressed: _save, child: const Text('Enregistrer')),
+      ],
+    );
+  }
+
+  void _save() {
+    if (!_formKey.currentState!.validate()) return;
+    final amount = double.parse(
+      _amountController.text.replaceAll(' ', '').replaceAll(',', '.'),
+    );
+    Navigator.pop(
+      context,
+      DossierOperation(
+        type: _type,
+        titre: _titleController.text.trim(),
+        categorie: _type == DossierOperationType.expense
+            ? _expenseCategory
+            : '',
+        montant: amount,
+        date: DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now()),
+        codeJournal: _journal?.code ?? '',
+      ),
+    );
+  }
+}
+
+String _operationLabel(DossierOperationType type) {
+  return switch (type) {
+    DossierOperationType.expense => 'Frais / dépense du dossier',
+    DossierOperationType.clientInvoice => 'Facture client',
+    DossierOperationType.clientPayment => 'Règlement client',
+    DossierOperationType.providerInvoice => 'Facture prestataire',
+    DossierOperationType.providerAdvance => 'Avance au prestataire',
+    DossierOperationType.providerPayment => 'Paiement prestataire',
+  };
+}
+
+IconData _operationIcon(DossierOperationType type) {
+  return switch (type) {
+    DossierOperationType.expense => Icons.receipt_long_rounded,
+    DossierOperationType.clientInvoice => Icons.request_quote_rounded,
+    DossierOperationType.clientPayment => Icons.payments_rounded,
+    DossierOperationType.providerInvoice => Icons.description_rounded,
+    DossierOperationType.providerAdvance =>
+      Icons.account_balance_wallet_rounded,
+    DossierOperationType.providerPayment => Icons.price_check_rounded,
+  };
+}
