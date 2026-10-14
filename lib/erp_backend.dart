@@ -48,6 +48,8 @@ abstract class ErpBackend {
   Future<void> logout();
 
   Future<void> saveUser(ErpUser user);
+  // Change la photo de l'utilisateur connecté (null pour la retirer).
+  Future<void> saveMyPhoto(String? photo);
   Future<void> saveClient(Client client);
   Future<void> savePrestataire(Prestataire prestataire);
   Future<void> saveAccount(PlanAccount account);
@@ -161,6 +163,10 @@ class HttpErpBackend implements ErpBackend {
   @override
   Future<void> saveUser(ErpUser user) =>
       _send('PUT', '/utilisateurs/${_segment(user.id)}', erpUserToJson(user));
+
+  @override
+  Future<void> saveMyPhoto(String? photo) =>
+      _send('PUT', '/moi/photo', {'photo': photo});
 
   @override
   Future<void> saveClient(Client client) =>
@@ -295,6 +301,11 @@ class MemoryErpBackend implements ErpBackend {
   Future<void> saveUser(ErpUser user) async {
     if (user.password.isNotEmpty) _passwords[user.id] = user.password;
     _upsert(users, user, (u) => u.id == user.id);
+  }
+
+  @override
+  Future<void> saveMyPhoto(String? photo) async {
+    _user!.photo = photo;
   }
 
   @override

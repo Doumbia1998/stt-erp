@@ -3,11 +3,13 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show TextInput;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
 
 import 'erp_backend.dart';
@@ -22,6 +24,7 @@ part 'pages/dossiers_page.dart';
 part 'pages/facture_transitaire_page.dart';
 part 'widgets/erp_documents.dart';
 part 'widgets/erp_grid.dart';
+part 'widgets/user_photo.dart';
 
 // Fonction globale pour formater les montants
 String formatCurrency(double amount) {
@@ -635,6 +638,21 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       ..add((moduleIndex: _selectedModuleIndex, title: _selectedMenuTitle));
   }
 
+  Future<void> _changeMyPhoto() async {
+    final user = _currentUser;
+    if (user == null) return;
+    final photo = await _pickProfilePhoto(context);
+    if (photo == null || !mounted) return;
+    if (!await _persist(context, () => erpBackend.saveMyPhoto(photo))) return;
+    setState(() {
+      user.photo = photo;
+      // La liste des utilisateurs (administrateur) affiche aussi la nouvelle photo.
+      for (final entry in _erpUsers.where((u) => u.id == user.id)) {
+        entry.photo = photo;
+      }
+    });
+  }
+
   void _selectMenu(int moduleIndex, ErpMenuItem item) {
     if (!widget.authorizedModules.contains(_modules[moduleIndex].title)) return;
     setState(() {
@@ -1012,18 +1030,34 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
             tooltip: 'Profil utilisateur',
             onSelected: (value) {
               if (value == 'logout') _logout(context);
+              if (value == 'photo') _changeMyPhoto();
             },
             itemBuilder: (context) => [
               PopupMenuItem<String>(
                 enabled: false,
                 child: ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading: const CircleAvatar(child: Text('ST')),
+                  leading: ErpUserAvatar(
+                    name: widget.userDisplayName,
+                    photo: _currentUser?.photo,
+                  ),
                   title: Text(widget.userDisplayName),
                   subtitle: Text(widget.userRole),
                 ),
               ),
               const PopupMenuDivider(),
+              PopupMenuItem<String>(
+                value: 'photo',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.photo_camera_outlined),
+                  title: Text(
+                    _currentUser?.photo == null
+                        ? 'Ajouter ma photo'
+                        : 'Changer ma photo',
+                  ),
+                ),
+              ),
               PopupMenuItem<String>(
                 value: 'logout',
                 child: ListTile(
@@ -1033,19 +1067,13 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                 ),
               ),
             ],
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 6),
-              child: CircleAvatar(
-                radius: 16,
-                backgroundColor: Color(0xFF526B85),
-                child: Text(
-                  'AD',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: ErpUserAvatar(
+                key: const ValueKey('header-user-avatar'),
+                name: widget.userDisplayName,
+                photo: _currentUser?.photo,
+                radius: 17,
               ),
             ),
           ),
@@ -1361,12 +1389,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
                           final user = users[index];
                           return Card(
                             child: ListTile(
-                              leading: CircleAvatar(
-                                child: Text(
-                                  user.name.isEmpty
-                                      ? '?'
-                                      : user.name[0].toUpperCase(),
-                                ),
+                              leading: ErpUserAvatar(
+                                name: user.name,
+                                photo: user.photo,
                               ),
                               title: Text(
                                 user.name,
@@ -1407,7 +1432,10 @@ class _UserManagementPageState extends State<UserManagementPage> {
     if (result == null || !mounted) return;
     if (!await _persist(context, () => erpBackend.saveUser(result))) return;
     // Le mot de passe saisi est chiffré par le serveur : on ne le garde pas en mémoire.
-    result.password = '';
+    result
+      ..password = ''
+      ..photoModifiee = false;
+    if (_currentUser?.id == result.id) _currentUser!.photo = result.photo;
     if (!mounted) return;
     setState(() {
       final index = widget.users.indexWhere((user) => user.id == result.id);
@@ -1442,16 +1470,26 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
   final _password = TextEditingController();
   late String _role;
   late Set<String> _access;
+  String? _photo;
+  bool _photoChanged = false;
 
   static const _minPasswordLength = 8;
 
   static const _roles = [
     'Administrateur',
     'Direction',
+    'Gérant',
     'Comptable',
     'Gestionnaire',
+    'Recouvreur',
     'Prestataire',
     'Transporteur',
+  ];
+
+  // Inclut un rôle enregistré qui ne serait plus dans la liste.
+  List<String> get _roleOptions => [
+    ..._roles,
+    if (!_roles.contains(_role)) _role,
   ];
 
   @override
@@ -1465,6 +1503,7 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
     if (user != null) {
       _name.text = user.name;
       _login.text = user.login;
+      _photo = user.photo;
     }
   }
 
@@ -1472,7 +1511,10 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
     switch (role) {
       case 'Administrateur':
       case 'Direction':
+      case 'Gérant':
         return modules.toSet();
+      case 'Recouvreur':
+        return {'Recouvrement'};
       case 'Comptable':
         return {'Comptabilité', 'Recouvrement'};
       case 'Prestataire':
@@ -1505,6 +1547,8 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              _buildPhotoPicker(),
+              const SizedBox(height: 16),
               _requiredField(_name, 'Nom complet'),
               _requiredField(_login, 'Identifiant'),
               TextFormField(
@@ -1541,7 +1585,7 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
                   labelText: 'Rôle',
                   border: OutlineInputBorder(),
                 ),
-                items: _roles
+                items: _roleOptions
                     .map(
                       (role) =>
                           DropdownMenuItem(value: role, child: Text(role)),
@@ -1634,9 +1678,52 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
         password: _password.text,
         role: _role,
         accessModules: _access,
+        photo: _photo,
+        photoModifiee: _photoChanged,
       ),
     );
   }
+
+  Widget _buildPhotoPicker() => Row(
+    children: [
+      ErpUserAvatar(
+        name: _name.text.isEmpty ? '?' : _name.text,
+        photo: _photo,
+        radius: 34,
+      ),
+      const SizedBox(width: 16),
+      Expanded(
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            OutlinedButton.icon(
+              key: const ValueKey('user-photo-pick'),
+              onPressed: () async {
+                final photo = await _pickProfilePhoto(context);
+                if (photo == null || !mounted) return;
+                setState(() {
+                  _photo = photo;
+                  _photoChanged = true;
+                });
+              },
+              icon: const Icon(Icons.photo_camera_outlined),
+              label: Text(_photo == null ? 'Ajouter une photo' : 'Changer'),
+            ),
+            if (_photo != null)
+              TextButton.icon(
+                onPressed: () => setState(() {
+                  _photo = null;
+                  _photoChanged = true;
+                }),
+                icon: const Icon(Icons.delete_outline_rounded),
+                label: const Text('Retirer'),
+              ),
+          ],
+        ),
+      ),
+    ],
+  );
 }
 
 class CashControlPage extends StatefulWidget {

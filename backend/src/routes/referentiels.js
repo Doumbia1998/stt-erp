@@ -17,6 +17,7 @@ const {
   integer,
   bool,
   list,
+  photo,
   frDateToSql,
   sqlDateToFr,
 } = require('../format');
@@ -332,6 +333,7 @@ function referentielsRouter(pool) {
         );
       }
       const passwordHash = password ? await hashPassword(password) : null;
+      const newPhoto = photo(b);
       const row = await withTransaction(pool, async (client) => {
         const values = [
           userId,
@@ -362,6 +364,12 @@ function referentielsRouter(pool) {
             [userId, req.tokenHash],
           );
         }
+        if (newPhoto !== undefined) {
+          ({ rows } = await client.query(
+            'UPDATE utilisateurs SET photo = $2 WHERE id = $1 RETURNING *',
+            [userId, newPhoto],
+          ));
+        }
         const admins = await client.query(
           'SELECT count(*)::int AS n FROM utilisateurs WHERE role = $1',
           [ADMIN_ROLE],
@@ -372,6 +380,21 @@ function referentielsRouter(pool) {
         return rows[0];
       });
       res.json(publicUser(row));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Chaque utilisateur peut changer sa propre photo.
+  router.put('/moi/photo', async (req, res, next) => {
+    try {
+      const newPhoto = photo(req.body);
+      if (newPhoto === undefined) throw badRequest('Photo manquante.');
+      const { rows } = await pool.query(
+        'UPDATE utilisateurs SET photo = $2, modifie_le = now() WHERE id = $1 RETURNING *',
+        [req.user.id, newPhoto],
+      );
+      res.json(publicUser(rows[0]));
     } catch (error) {
       next(error);
     }

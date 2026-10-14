@@ -118,7 +118,25 @@ function oneOf(source, key, allowed) {
   return value;
 }
 
+// Photo de profil : undefined = inchangée, null = supprimée, sinon image JPEG/PNG en base64.
+const MAX_PHOTO_BYTES = 300 * 1024;
+function photo(source, key = 'photo') {
+  if (!(key in (source ?? {}))) return undefined;
+  const value = source[key];
+  if (value === null || value === '') return null;
+  if (typeof value !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+    throw badRequest('Photo invalide.');
+  }
+  const bytes = Buffer.from(value, 'base64');
+  const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  const isPng = bytes.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  if (!isJpeg && !isPng) throw badRequest('La photo doit être une image JPEG ou PNG.');
+  if (bytes.length > MAX_PHOTO_BYTES) throw badRequest('La photo est trop lourde (300 Ko maximum).');
+  return value;
+}
+
 module.exports = {
+  photo,
   frDateToSql,
   frDateTimeToSql,
   sqlDateToFr,

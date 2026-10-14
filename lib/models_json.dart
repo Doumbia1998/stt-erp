@@ -13,6 +13,7 @@ ErpUser erpUserFromJson(Map<String, dynamic> json) => ErpUser(
   password: '',
   role: _str(json['role']),
   accessModules: {...(json['modules'] as List? ?? const []).cast<String>()},
+  photo: json['photo'] as String?,
 );
 
 // Le mot de passe n'est envoyé que s'il a été saisi (sinon le serveur garde l'ancien).
@@ -22,6 +23,7 @@ Map<String, dynamic> erpUserToJson(ErpUser user) => {
   'role': user.role,
   'modules': user.accessModules.toList(),
   if (user.password.isNotEmpty) 'motDePasse': user.password,
+  if (user.photoModifiee) 'photo': user.photo,
 };
 
 Client clientFromJson(Map<String, dynamic> json) => Client(

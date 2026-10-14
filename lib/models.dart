@@ -5,6 +5,10 @@ class ErpUser {
   String password;
   String role;
   Set<String> accessModules;
+  // Photo de profil (JPEG en base64), null si aucune.
+  String? photo;
+  // Vrai quand la photo a été changée ou retirée et doit être envoyée.
+  bool photoModifiee;
 
   ErpUser({
     required this.id,
@@ -13,6 +17,8 @@ class ErpUser {
     required this.password,
     required this.role,
     required this.accessModules,
+    this.photo,
+    this.photoModifiee = false,
   });
 }
 

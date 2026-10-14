@@ -53,6 +53,7 @@ const publicUser = (row) => ({
   identifiant: row.identifiant,
   role: row.role,
   modules: row.modules,
+  photo: row.photo ?? null,
 });
 
 async function login(pool, identifiant, motDePasse) {

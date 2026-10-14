@@ -339,6 +339,22 @@ test('users are managed by the administrator with hashed passwords', async () =>
   const data = await call('GET', '/donnees', undefined, comptaToken);
   assert.equal(data.body.utilisateurs.length, 0);
 
+  // Photo de profil : chacun peut changer la sienne ; une image invalide est refusée.
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]).toString('base64');
+  const ownPhoto = await call('PUT', '/moi/photo', { photo: jpeg }, comptaToken);
+  assert.equal(ownPhoto.status, 200);
+  assert.equal(ownPhoto.body.photo, jpeg);
+  assert.equal(
+    (await call('PUT', '/moi/photo', { photo: 'pas-une-image' }, comptaToken)).status,
+    400,
+  );
+  assert.equal(
+    (await call('PUT', '/moi/photo', { photo: Buffer.from('GIF89a').toString('base64') }, comptaToken)).status,
+    400,
+  );
+  const me = await call('GET', '/donnees', undefined, comptaToken);
+  assert.equal(me.body.utilisateur.photo, jpeg);
+
   // Modifier sans mot de passe conserve l'ancien.
   await call('PUT', '/utilisateurs/u1', {
     nom: 'Comptable principal',
@@ -350,6 +366,20 @@ test('users are managed by the administrator with hashed passwords', async () =>
     (await call('POST', '/auth/connexion', { identifiant: 'compta', motDePasse: 'compta-2026' })).status,
     200,
   );
+  let users = await call('GET', '/donnees');
+  assert.equal(users.body.utilisateurs.find((u) => u.id === 'u1').photo, jpeg);
+
+  // L'administrateur peut retirer la photo d'un membre.
+  const removed = await call('PUT', '/utilisateurs/u1', {
+    nom: 'Comptable principal',
+    identifiant: 'compta',
+    role: 'Recouvreur',
+    modules: ['Recouvrement'],
+    photo: null,
+  });
+  assert.equal(removed.status, 200);
+  assert.equal(removed.body.photo, null);
+  assert.equal(removed.body.role, 'Recouvreur');
 
   // Le dernier administrateur ne peut pas perdre son rôle.
   const demote = await call('PUT', '/utilisateurs/admin', {
