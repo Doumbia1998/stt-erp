@@ -117,6 +117,29 @@ void main() {
           isA<ErpBackendException>().having((e) => e.status, 'status', 409),
         ),
       );
+      // Un règlement peut être supprimé ; un dossier vide aussi.
+      dossier.operations.clear();
+      await backend.saveDossier(dossier);
+      expect(dossier.version, 3);
+      expect(dossier.numero, greaterThan(0));
+      expect(dossier.auteurSaisie, 'Administrateur');
+      final empty = TransitDossier(
+        id: 'vide-$suffix',
+        numDossier: 'VIDE-$suffix',
+        numBL: '',
+        numLB: '',
+        client: client,
+        nbConteneurs: 0,
+        dateDebut: '09/10/2026',
+      );
+      await backend.saveDossier(empty);
+      await backend.deleteDossier(empty);
+      final after = await backend.reload();
+      expect(after.dossiers.where((d) => d.id == empty.id), isEmpty);
+      expect(
+        after.dossiers.singleWhere((d) => d.id == dossier.id).operations,
+        isEmpty,
+      );
       await backend.logout();
     },
     skip: _url.isEmpty ? 'API_TEST_URL non défini' : null,

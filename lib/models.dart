@@ -63,11 +63,15 @@ class PlanAccount {
 class Depense {
   final String titre, categorie, date;
   final double montant;
+  final String auteur;
+  final String saisiLe;
   Depense({
     required this.titre,
     required this.montant,
     required this.categorie,
     required this.date,
+    this.auteur = '',
+    this.saisiLe = '',
   });
 }
 
@@ -123,6 +127,7 @@ class InvoiceLine {
   final double autresFrais;
   final double avanceCamion;
   final String plaqueVehicule;
+  final String telephoneChauffeur;
 
   const InvoiceLine({
     required this.description,
@@ -139,6 +144,7 @@ class InvoiceLine {
     this.autresFrais = 0,
     this.avanceCamion = 0,
     this.plaqueVehicule = '',
+    this.telephoneChauffeur = '',
   });
 
   double get total => quantite * prixUnitaire;
@@ -152,9 +158,12 @@ class InvoiceLine {
 
 class DossierInvoice {
   final String id;
-  final String reference;
+  // Numéro affiché dans les grilles (attribué par le serveur).
+  int numero;
+  String reference;
   final DossierInvoiceKind kind;
   String description;
+  String observations;
   double montant;
   String statut;
   String dateEmission;
@@ -162,14 +171,18 @@ class DossierInvoice {
 
   DossierInvoice({
     required this.id,
+    this.numero = 0,
     required this.reference,
     required this.kind,
     this.description = '',
+    this.observations = '',
     this.montant = 0,
     this.statut = 'Brouillon',
     this.dateEmission = '',
     List<InvoiceLine>? lignes,
   }) : lignes = lignes ?? [];
+
+  bool get estValidee => statut == 'Clôturée';
 }
 
 class JournalCode {
@@ -186,22 +199,42 @@ class JournalCode {
   });
 }
 
+int _idCounter = 0;
+
+// Identifiant unique généré côté ERP (horodatage + compteur).
+String newLocalId(String prefix) =>
+    '$prefix-${DateTime.now().microsecondsSinceEpoch}-${_idCounter++}';
+
 class DossierOperation {
+  // Identifiant stable : permet de supprimer un règlement précis.
+  final String id;
   final DossierOperationType type;
   final String titre;
   final String categorie;
   final double montant;
   final String date;
   final String codeJournal;
+  final String modePaiement;
+  final String numeroCheque;
+  final String observations;
+  final String auteur;
+  // « jj/mm/aaaa hh:mm » de la saisie.
+  final String saisiLe;
 
-  const DossierOperation({
+  DossierOperation({
+    String? id,
     required this.type,
     required this.titre,
     this.categorie = '',
     required this.montant,
     required this.date,
     this.codeJournal = '',
-  });
+    this.modePaiement = '',
+    this.numeroCheque = '',
+    this.observations = '',
+    this.auteur = '',
+    this.saisiLe = '',
+  }) : id = id ?? newLocalId('op');
 }
 
 class TransitDossier {
@@ -232,6 +265,13 @@ class TransitDossier {
   // Version enregistrée côté serveur (0 = dossier pas encore enregistré).
   int version;
 
+  // Attribués par le serveur à l'enregistrement.
+  int numero;
+  String auteurSaisie;
+  // « jj/mm/aaaa hh:mm » de la création.
+  String dateSaisie;
+  String dateLivraisonSouhaitee;
+
   TransitDossier({
     required this.id,
     required this.numDossier,
@@ -260,6 +300,10 @@ class TransitDossier {
     List<Depense>? depenses,
     List<DossierOperation>? operations,
     this.version = 0,
+    this.numero = 0,
+    this.auteurSaisie = '',
+    this.dateSaisie = '',
+    this.dateLivraisonSouhaitee = '',
   }) : factureClient =
            factureClient ??
            DossierInvoice(
@@ -334,29 +378,69 @@ class TransitDossier {
       totalAvancesPrestataire -
       totalReglementsPrestataire;
 
+  // Un dossier sans prestataire (transitaire « LUI MEME ») n'a que la facture client.
   bool get peutCloturer =>
       statut != 'Clôturé' &&
-      prestataire != null &&
       factureClient.statut == 'Clôturée' &&
-      (prestataire!.type == 'Transitaire'
-          ? factureTransitaire.statut == 'Clôturée'
-          : prestataire!.type == 'Transporteur'
-          ? factureTransporteur.statut == 'Clôturée'
-          : facturePrestataire.statut == 'Clôturée') &&
+      (prestataire == null ||
+          (prestataire!.type == 'Transitaire'
+              ? factureTransitaire.statut == 'Clôturée'
+              : prestataire!.type == 'Transporteur'
+              ? factureTransporteur.statut == 'Clôturée'
+              : facturePrestataire.statut == 'Clôturée')) &&
       soldeClient <= 0 &&
       soldePrestataire <= 0;
+
+  bool get estFacture => factureClient.estValidee;
+  bool get estCloture => statut == 'Clôturé';
+  int get nbConteneurs20 => conteneurs.where((c) => c.isVingtPieds).length;
+  int get nbConteneurs40 => conteneurs.where((c) => c.isQuarantePieds).length;
+
+  // Nom affiché du transitaire (« LUI MEME » quand le client est son propre transitaire).
+  String get nomTransitaire =>
+      transitaireAffecte?.entreprise ??
+      (transitaire.isEmpty ? '' : transitaire);
+
+  // Règlements rattachés à une facture fournisseur (même règle que le serveur).
+  Iterable<DossierOperation> reglementsDe(DossierInvoiceKind kind) {
+    const categories = {
+      DossierInvoiceKind.forwarder: 'Règlement Transitaire',
+      DossierInvoiceKind.carrier: 'Règlement Transporteur',
+    };
+    return operations.where((op) {
+      if (kind == DossierInvoiceKind.client) {
+        return op.type == DossierOperationType.clientPayment;
+      }
+      if (op.type != DossierOperationType.providerPayment &&
+          op.type != DossierOperationType.providerAdvance) {
+        return false;
+      }
+      if (kind == DossierInvoiceKind.provider) {
+        return !categories.values.contains(op.categorie);
+      }
+      return op.categorie == categories[kind];
+    });
+  }
+
+  double totalRegleDe(DossierInvoiceKind kind) =>
+      reglementsDe(kind).fold(0, (sum, op) => sum + op.montant);
 }
 
 class TransitContainer {
   final String numero;
   final String type;
   final String marchandise;
+  final String observation;
 
   const TransitContainer({
     required this.numero,
     required this.type,
     required this.marchandise,
+    this.observation = '',
   });
+
+  bool get isVingtPieds => type.trim().startsWith('20');
+  bool get isQuarantePieds => type.trim().startsWith('40');
 }
 
 class Prestataire {

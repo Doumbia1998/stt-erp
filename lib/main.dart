@@ -1,14 +1,27 @@
+import 'dart:convert';
+import 'dart:math' as math;
+import 'dart:typed_data';
+
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show TextInput;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:intl/intl.dart';
 
 import 'erp_backend.dart';
+import 'file_saver.dart';
 import 'models.dart';
 
 export 'erp_backend.dart' show ErpBackend, MemoryErpBackend, erpBackend;
 export 'models.dart';
+
+part 'pages/dossier_dialogs.dart';
+part 'pages/dossiers_page.dart';
+part 'pages/facture_transitaire_page.dart';
+part 'widgets/erp_documents.dart';
+part 'widgets/erp_grid.dart';
 
 // Fonction globale pour formater les montants
 String formatCurrency(double amount) {
@@ -89,6 +102,7 @@ void main() {
 }
 
 // Données de l'ERP, chargées depuis l'API à la connexion.
+ErpUser? _currentUser;
 final List<ErpUser> _erpUsers = [];
 final List<Client> _clients = [];
 final List<TransitDossier> _dossiers = [];
@@ -98,6 +112,7 @@ final List<JournalCode> _journalCodes = [];
 final List<Voyage> _voyages = [];
 
 void _loadErpData(ErpData data) {
+  _currentUser = data.user;
   _erpUsers
     ..clear()
     ..addAll(data.users);
@@ -160,6 +175,8 @@ class _LoginPageState extends State<LoginPage> {
     try {
       final data = await erpBackend.login(_userCtrl.text, _passCtrl.text);
       if (!mounted) return;
+      // Connexion réussie : le navigateur peut proposer d'enregistrer les identifiants.
+      TextInput.finishAutofillContext();
       _loadErpData(data);
       Navigator.pushReplacement(
         context,
@@ -240,60 +257,71 @@ class _LoginPageState extends State<LoginPage> {
                           style: TextStyle(fontSize: 14, color: Colors.grey),
                         ),
                         const SizedBox(height: 40),
-                        TextField(
-                          controller: _userCtrl,
-                          decoration: InputDecoration(
-                            labelText: "Utilisateur",
-                            prefixIcon: const Icon(Icons.person_outline),
-                            filled: true,
-                            fillColor: Colors.grey[50],
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(15),
-                              borderSide: BorderSide(
-                                color: Colors.grey.shade300,
+                        // Le navigateur propose d'enregistrer puis remplit
+                        // automatiquement l'identifiant et le mot de passe.
+                        AutofillGroup(
+                          child: Column(
+                            children: [
+                              TextField(
+                                controller: _userCtrl,
+                                autofillHints: const [AutofillHints.username],
+                                textInputAction: TextInputAction.next,
+                                decoration: InputDecoration(
+                                  labelText: "Utilisateur",
+                                  prefixIcon: const Icon(Icons.person_outline),
+                                  filled: true,
+                                  fillColor: Colors.grey[50],
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(15),
+                                    borderSide: BorderSide(
+                                      color: Colors.grey.shade300,
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(15),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFF1A237E),
+                                      width: 2,
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(15),
-                              borderSide: const BorderSide(
-                                color: Color(0xFF1A237E),
-                                width: 2,
+                              const SizedBox(height: 20),
+                              TextField(
+                                controller: _passCtrl,
+                                obscureText: _obscure,
+                                autofillHints: const [AutofillHints.password],
+                                onSubmitted: (_) => _login(),
+                                decoration: InputDecoration(
+                                  labelText: "Mot de passe",
+                                  prefixIcon: const Icon(Icons.lock_outline),
+                                  suffixIcon: IconButton(
+                                    icon: Icon(
+                                      _obscure
+                                          ? Icons.visibility_off
+                                          : Icons.visibility,
+                                    ),
+                                    onPressed: () =>
+                                        setState(() => _obscure = !_obscure),
+                                  ),
+                                  filled: true,
+                                  fillColor: Colors.grey[50],
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(15),
+                                    borderSide: BorderSide(
+                                      color: Colors.grey.shade300,
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(15),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFF1A237E),
+                                      width: 2,
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        TextField(
-                          controller: _passCtrl,
-                          obscureText: _obscure,
-                          onSubmitted: (_) => _login(),
-                          decoration: InputDecoration(
-                            labelText: "Mot de passe",
-                            prefixIcon: const Icon(Icons.lock_outline),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscure
-                                    ? Icons.visibility_off
-                                    : Icons.visibility,
-                              ),
-                              onPressed: () =>
-                                  setState(() => _obscure = !_obscure),
-                            ),
-                            filled: true,
-                            fillColor: Colors.grey[50],
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(15),
-                              borderSide: BorderSide(
-                                color: Colors.grey.shade300,
-                              ),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(15),
-                              borderSide: const BorderSide(
-                                color: Color(0xFF1A237E),
-                                width: 2,
-                              ),
-                            ),
+                            ],
                           ),
                         ),
                         const SizedBox(height: 35),
@@ -731,7 +759,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           availableModuleIndexes: _visibleModuleIndexes,
         );
       case 'Dossier':
-        return DashboardPage(
+        return DossiersPage(
           dossiers: _dossiers,
           clients: _clients,
           prestataires: _prestataires,
@@ -770,11 +798,10 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           userDisplayName: widget.userDisplayName,
         );
       case 'Facture Transitaire':
-        return DossierInvoicesPage(
+        return FactureTransitairePage(
           dossiers: _dossiers,
-          kind: DossierInvoiceKind.forwarder,
           prestataires: _prestataires,
-          userDisplayName: widget.userDisplayName,
+          journals: _journalCodes,
         );
       case 'Facture Transporteur':
         return DossierInvoicesPage(
@@ -5788,863 +5815,6 @@ class _DossierInvoiceDetailPageState extends State<DossierInvoiceDetailPage> {
 }
 
 // --- PAGE DOSSIERS ---
-
-class DashboardPage extends StatefulWidget {
-  final List<TransitDossier> dossiers;
-  final List<Client> clients;
-  final List<Prestataire> prestataires;
-  final List<JournalCode> journals;
-  const DashboardPage({
-    super.key,
-    required this.dossiers,
-    required this.clients,
-    required this.prestataires,
-    required this.journals,
-  });
-  @override
-  State<DashboardPage> createState() => _DashboardPageState();
-}
-
-class _DashboardPageState extends State<DashboardPage> {
-  String q = "";
-
-  @override
-  Widget build(BuildContext context) {
-    final fil = widget.dossiers
-        .where(
-          (d) =>
-              d.numDossier.toLowerCase().contains(q.toLowerCase()) ||
-              d.client.nom.toLowerCase().contains(q.toLowerCase()),
-        )
-        .toList();
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FD),
-      appBar: AppBar(
-        title: const Text(
-          "Gestion des Dossiers",
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: const Color(0xFF1A237E),
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () => _logout(context),
-          ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(80),
-          child: Center(
-            child: Container(
-              width: 800,
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: TextField(
-                onChanged: (v) => setState(() => q = v),
-                decoration: InputDecoration(
-                  hintText: "Rechercher un dossier...",
-                  prefixIcon: const Icon(
-                    Icons.search,
-                    color: Color(0xFF1A237E),
-                  ),
-                  fillColor: Colors.white,
-                  filled: true,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(15),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-      body: Center(
-        child: Container(
-          width: 800,
-          child: fil.isEmpty
-              ? const Center(child: Text("Aucun dossier trouvé"))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: fil.length,
-                  itemBuilder: (context, i) => Card(
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                    margin: const EdgeInsets.only(bottom: 12),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.all(15),
-                      title: Text(
-                        "Dossier: ${fil[i].numDossier}",
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-                      subtitle: Text(
-                        [
-                          'Client : ${fil[i].client.nom}',
-                          if (fil[i].transitaire.isNotEmpty)
-                            'Transitaire : ${fil[i].transitaire}',
-                          if (fil[i].prestataire != null)
-                            'Prestataire : ${fil[i].prestataire!.entreprise}',
-                          'BL : ${fil[i].numBL.isEmpty ? '-' : fil[i].numBL} • ${fil[i].nbConteneurs} conteneur(s)',
-                        ].join('\n'),
-                      ),
-                      trailing: Text(
-                        "${formatCurrency(fil[i].totalDepenses)} F",
-                        style: const TextStyle(
-                          color: Colors.redAccent,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => DetailsDossierPage(
-                            dossier: fil[i],
-                            journals: widget.journals,
-                          ),
-                        ),
-                      ).then((_) => setState(() {})),
-                    ),
-                  ),
-                ),
-        ),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'client-add',
-        backgroundColor: const Color(0xFF1A237E),
-        onPressed: _showAdd,
-        label: const Text(
-          "NOUVEAU DOSSIER",
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        icon: const Icon(Icons.add, color: Colors.white),
-      ),
-    );
-  }
-
-  Future<void> _showAdd() async {
-    final dossier = await showDialog<TransitDossier>(
-      context: context,
-      builder: (context) => _DossierFormDialog(
-        clients: widget.clients,
-        prestataires: widget.prestataires,
-      ),
-    );
-    if (dossier == null || !mounted) return;
-    if (!await _persist(context, () => erpBackend.saveDossier(dossier))) return;
-    if (mounted) setState(() => widget.dossiers.add(dossier));
-  }
-}
-
-class _ContainerFormEntry {
-  final number = TextEditingController();
-  final cargo = TextEditingController();
-  String type = '40 pieds';
-
-  void dispose() {
-    number.dispose();
-    cargo.dispose();
-  }
-}
-
-class _DossierFormDialog extends StatefulWidget {
-  final List<Client> clients;
-  final List<Prestataire> prestataires;
-
-  const _DossierFormDialog({required this.clients, required this.prestataires});
-
-  @override
-  State<_DossierFormDialog> createState() => _DossierFormDialogState();
-}
-
-class _DossierFormDialogState extends State<_DossierFormDialog> {
-  final _formKey = GlobalKey<FormState>();
-  final _dossierNumber = TextEditingController(
-    text: 'STT-${DateFormat('yyMMdd-HHmm').format(DateTime.now())}',
-  );
-  final _billOfLading = TextEditingController();
-  final _transitaire = TextEditingController();
-  final _goodsType = TextEditingController();
-  final _goodsLocation = TextEditingController();
-  final _deliveryLocation = TextEditingController();
-  final _description = TextEditingController();
-  final List<_ContainerFormEntry> _containers = [];
-  Client? _selectedClient;
-  Prestataire? _selectedPrestataire;
-  DateTime _creationDate = DateTime.now();
-  DateTime? _arrivalDate;
-  String _billingType = 'Tarif complet';
-  String _priority = 'Priorité normale';
-
-  static const _primary = Color(0xFF1A237E);
-  static const _containerTypes = [
-    '20 pieds',
-    '40 pieds',
-    '40 pieds HC',
-    'Autre',
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _containers.add(_ContainerFormEntry());
-  }
-
-  @override
-  void dispose() {
-    _dossierNumber.dispose();
-    _billOfLading.dispose();
-    _transitaire.dispose();
-    _goodsType.dispose();
-    _goodsLocation.dispose();
-    _deliveryLocation.dispose();
-    _description.dispose();
-    for (final container in _containers) {
-      container.dispose();
-    }
-    super.dispose();
-  }
-
-  String _formatDate(DateTime date) => DateFormat('dd/MM/yyyy').format(date);
-
-  String? _required(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Champ obligatoire';
-    }
-    return null;
-  }
-
-  Future<void> _pickDate({required bool arrival}) async {
-    final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: arrival ? (_arrivalDate ?? now) : _creationDate,
-      firstDate: DateTime(now.year - 10),
-      lastDate: DateTime(now.year + 10),
-      helpText: arrival ? 'Date d’arrivée du bateau' : 'Date de création',
-      cancelText: 'Annuler',
-      confirmText: 'Choisir',
-    );
-    if (picked == null || !mounted) return;
-    setState(() {
-      if (arrival) {
-        _arrivalDate = picked;
-      } else {
-        _creationDate = picked;
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final screen = MediaQuery.sizeOf(context);
-    final width = (screen.width - 32).clamp(320.0, 1000.0);
-    final height = (screen.height * 0.92).clamp(420.0, 900.0);
-    final fieldGap = 14.0;
-
-    return Dialog(
-      insetPadding: const EdgeInsets.all(16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-      child: SizedBox(
-        width: width,
-        height: height,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final compact = constraints.maxWidth < 650;
-            final formContentWidth = constraints.maxWidth - 36;
-            final fieldWidth = compact
-                ? formContentWidth
-                : (formContentWidth - fieldGap) / 2;
-            return Column(
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: EdgeInsets.symmetric(
-                    horizontal: compact ? 18 : 26,
-                    vertical: 18,
-                  ),
-                  decoration: const BoxDecoration(
-                    color: _primary,
-                    borderRadius: BorderRadius.vertical(
-                      top: Radius.circular(22),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      const CircleAvatar(
-                        backgroundColor: Colors.white24,
-                        child: Icon(
-                          Icons.folder_copy_rounded,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Nouveau dossier client',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 19,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            SizedBox(height: 3),
-                            Text(
-                              'Renseignez les informations du transit et des conteneurs',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Fermer',
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.close, color: Colors.white),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Form(
-                    key: _formKey,
-                    child: ListView(
-                      padding: EdgeInsets.all(compact ? 18 : 26),
-                      children: [
-                        _formSection(
-                          icon: Icons.assignment_outlined,
-                          title: 'Informations du dossier',
-                          subtitle: 'Client, transitaire et références',
-                          children: [
-                            SizedBox(
-                              width: fieldWidth,
-                              child: SearchableDropdownFormField<Client>(
-                                key: const ValueKey('dossier-client-search'),
-                                options: widget.clients,
-                                value: _selectedClient,
-                                label: 'Client *',
-                                emptyText: 'Aucun client enregistré',
-                                displayString: (client) => client.nom,
-                                onChanged: (client) =>
-                                    setState(() => _selectedClient = client),
-                              ),
-                            ),
-                            _formText(
-                              width: fieldWidth,
-                              controller: _transitaire,
-                              label: 'Transitaire / chargeur',
-                              icon: Icons.business_outlined,
-                            ),
-                            SizedBox(
-                              width: fieldWidth,
-                              child: SearchableDropdownFormField<Prestataire>(
-                                key: const ValueKey('dossier-provider-search'),
-                                options: widget.prestataires,
-                                value: _selectedPrestataire,
-                                label: 'Prestataire affecté',
-                                emptyText: 'Aucun prestataire enregistré',
-                                required: false,
-                                displayString: (provider) =>
-                                    '${provider.entreprise} • ${provider.villePort}',
-                                onChanged: (provider) => setState(
-                                  () => _selectedPrestataire = provider,
-                                ),
-                              ),
-                            ),
-                            _formText(
-                              width: fieldWidth,
-                              controller: _dossierNumber,
-                              label: 'Numéro de dossier *',
-                              icon: Icons.tag_rounded,
-                              validator: _required,
-                            ),
-                            _formText(
-                              width: fieldWidth,
-                              controller: _billOfLading,
-                              label: 'N° BL (connaissement)',
-                              icon: Icons.article_outlined,
-                            ),
-                            _dateField(
-                              width: fieldWidth,
-                              label: 'Date de création',
-                              value: _formatDate(_creationDate),
-                              onTap: () => _pickDate(arrival: false),
-                            ),
-                            SizedBox(
-                              width: fieldWidth,
-                              child: DropdownButtonFormField<String>(
-                                isExpanded: true,
-                                initialValue: _billingType,
-                                decoration: _fieldDecoration(
-                                  'Type de facturation',
-                                  Icons.receipt_long_outlined,
-                                ),
-                                items: const [
-                                  DropdownMenuItem(
-                                    value: 'Tarif complet',
-                                    child: Text('Tarif complet'),
-                                  ),
-                                  DropdownMenuItem(
-                                    value: 'Tarif partiel',
-                                    child: Text('Tarif partiel'),
-                                  ),
-                                  DropdownMenuItem(
-                                    value: 'À définir',
-                                    child: Text('À définir'),
-                                  ),
-                                ],
-                                onChanged: (value) {
-                                  if (value != null) {
-                                    setState(() => _billingType = value);
-                                  }
-                                },
-                              ),
-                            ),
-                            SizedBox(
-                              width: fieldWidth,
-                              child: DropdownButtonFormField<String>(
-                                isExpanded: true,
-                                initialValue: _priority,
-                                decoration: _fieldDecoration(
-                                  'Type de priorité',
-                                  Icons.flag_outlined,
-                                ),
-                                items: const [
-                                  DropdownMenuItem(
-                                    value: 'Priorité normale',
-                                    child: Text('Priorité normale'),
-                                  ),
-                                  DropdownMenuItem(
-                                    value: 'Priorité élevée',
-                                    child: Text('Priorité élevée'),
-                                  ),
-                                  DropdownMenuItem(
-                                    value: 'Urgent',
-                                    child: Text('Urgent'),
-                                  ),
-                                ],
-                                onChanged: (value) {
-                                  if (value != null) {
-                                    setState(() => _priority = value);
-                                  }
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 22),
-                        _formSection(
-                          icon: Icons.inventory_2_outlined,
-                          title: 'Marchandise et itinéraire',
-                          subtitle: 'Informations logistiques et arrivée',
-                          children: [
-                            _formText(
-                              width: fieldWidth,
-                              controller: _goodsType,
-                              label: 'Type de marchandise',
-                              icon: Icons.category_outlined,
-                            ),
-                            _formText(
-                              width: fieldWidth,
-                              controller: _goodsLocation,
-                              label: 'Lieu de la marchandise',
-                              icon: Icons.location_on_outlined,
-                            ),
-                            _formText(
-                              width: fieldWidth,
-                              controller: _deliveryLocation,
-                              label: 'Lieu de livraison',
-                              icon: Icons.flag_circle_outlined,
-                            ),
-                            _dateField(
-                              width: fieldWidth,
-                              label: 'Date d’arrivée du bateau',
-                              value: _arrivalDate == null
-                                  ? ''
-                                  : _formatDate(_arrivalDate!),
-                              placeholder: 'Sélectionner une date',
-                              onTap: () => _pickDate(arrival: true),
-                            ),
-                            _formText(
-                              width: formContentWidth,
-                              controller: _description,
-                              label: 'Description / instructions',
-                              icon: Icons.notes_rounded,
-                              maxLines: 3,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 22),
-                        Wrap(
-                          alignment: WrapAlignment.spaceBetween,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          runSpacing: 8,
-                          children: [
-                            const SizedBox(
-                              width: 260,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Liste des conteneurs',
-                                    style: TextStyle(
-                                      color: Color(0xFF172B4D),
-                                      fontSize: 17,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  SizedBox(height: 3),
-                                  Text(
-                                    'Ajoutez les références et le type de chaque conteneur',
-                                    style: TextStyle(
-                                      color: Color(0xFF718096),
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            TextButton.icon(
-                              onPressed: () => setState(
-                                () => _containers.add(_ContainerFormEntry()),
-                              ),
-                              icon: const Icon(Icons.add),
-                              label: const Text('Ajouter'),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        if (_containers.isEmpty)
-                          Container(
-                            padding: const EdgeInsets.all(18),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF5F7FB),
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: const Text(
-                              'Aucun conteneur ajouté. Utilisez « Ajouter » pour en saisir un.',
-                              style: TextStyle(color: Color(0xFF718096)),
-                            ),
-                          ),
-                        ...List.generate(_containers.length, (index) {
-                          final container = _containers[index];
-                          return _buildContainerRow(
-                            container,
-                            index,
-                            compact: compact,
-                          );
-                        }),
-                        if (widget.clients.isEmpty) ...[
-                          const SizedBox(height: 14),
-                          const Text(
-                            'Aucun client n’est encore enregistré. Ajoutez d’abord un client dans Transitaire > Clients pour créer son dossier.',
-                            style: TextStyle(
-                              color: Color(0xFFB45309),
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-                const Divider(height: 1),
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 22,
-                    vertical: 14,
-                  ),
-                  child: Wrap(
-                    alignment: WrapAlignment.end,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    spacing: 10,
-                    children: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('Annuler'),
-                      ),
-                      FilledButton.icon(
-                        onPressed: _save,
-                        icon: const Icon(Icons.check_rounded),
-                        label: const Text('Créer le dossier'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: _primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 14,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _formSection({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required List<Widget> children,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFE6EBF2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: _primary, size: 22),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: Color(0xFF172B4D),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: const TextStyle(
-                        color: Color(0xFF718096),
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Wrap(spacing: 14, runSpacing: 14, children: children),
-        ],
-      ),
-    );
-  }
-
-  InputDecoration _fieldDecoration(String label, IconData icon) {
-    return InputDecoration(
-      labelText: label,
-      prefixIcon: Icon(icon, size: 20),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFFDCE3EC)),
-      ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
-    );
-  }
-
-  Widget _formText({
-    required double width,
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    String? Function(String?)? validator,
-    int maxLines = 1,
-  }) {
-    return SizedBox(
-      width: width,
-      child: TextFormField(
-        controller: controller,
-        validator: validator,
-        maxLines: maxLines,
-        decoration: _fieldDecoration(label, icon),
-      ),
-    );
-  }
-
-  Widget _dateField({
-    required double width,
-    required String label,
-    required String value,
-    required VoidCallback onTap,
-    String placeholder = 'Sélectionner une date',
-  }) {
-    return SizedBox(
-      width: width,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: InputDecorator(
-          decoration: _fieldDecoration(label, Icons.calendar_month_rounded),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  value.isEmpty ? placeholder : value,
-                  style: TextStyle(
-                    color: value.isEmpty
-                        ? const Color(0xFF718096)
-                        : const Color(0xFF172B4D),
-                  ),
-                ),
-              ),
-              const Icon(Icons.arrow_drop_down, color: Color(0xFF718096)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildContainerRow(
-    _ContainerFormEntry container,
-    int index, {
-    required bool compact,
-  }) {
-    return Container(
-      key: ValueKey('container-row-$index'),
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF7F9FC),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE6EBF2)),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final narrow = compact || constraints.maxWidth < 560;
-          final inputWidth = narrow
-              ? constraints.maxWidth
-              : (constraints.maxWidth - 100) / 3;
-          final inputs = [
-            SizedBox(
-              width: inputWidth,
-              child: TextFormField(
-                key: ValueKey('container-number-$index'),
-                controller: container.number,
-                decoration: _fieldDecoration(
-                  'Numéro conteneur',
-                  Icons.tag_rounded,
-                ),
-              ),
-            ),
-            SizedBox(
-              width: inputWidth,
-              child: DropdownButtonFormField<String>(
-                isExpanded: true,
-                initialValue: container.type,
-                decoration: _fieldDecoration(
-                  'Type de conteneur',
-                  Icons.inventory_2_outlined,
-                ),
-                items: _containerTypes
-                    .map(
-                      (type) =>
-                          DropdownMenuItem(value: type, child: Text(type)),
-                    )
-                    .toList(),
-                onChanged: (value) {
-                  if (value != null) setState(() => container.type = value);
-                },
-              ),
-            ),
-            SizedBox(
-              width: inputWidth,
-              child: TextFormField(
-                controller: container.cargo,
-                decoration: _fieldDecoration(
-                  'Marchandise',
-                  Icons.inventory_outlined,
-                ),
-              ),
-            ),
-          ];
-          return Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              ...inputs,
-              IconButton(
-                tooltip: 'Supprimer ce conteneur',
-                onPressed: () => setState(() {
-                  _containers.removeAt(index);
-                  container.dispose();
-                }),
-                icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  void _save() {
-    if (!_formKey.currentState!.validate()) return;
-    final client = _selectedClient;
-    if (client == null) return;
-
-    final containers = _containers
-        .where(
-          (container) =>
-              container.number.text.trim().isNotEmpty ||
-              container.cargo.text.trim().isNotEmpty,
-        )
-        .map(
-          (container) => TransitContainer(
-            numero: container.number.text.trim(),
-            type: container.type,
-            marchandise: container.cargo.text.trim(),
-          ),
-        )
-        .toList();
-
-    Navigator.pop(
-      context,
-      TransitDossier(
-        id: DateTime.now().microsecondsSinceEpoch.toString(),
-        numDossier: _dossierNumber.text.trim(),
-        numBL: _billOfLading.text.trim(),
-        numLB: '',
-        client: client,
-        nbConteneurs: containers.length,
-        dateDebut: _formatDate(_creationDate),
-        transitaire: _transitaire.text.trim(),
-        prestataire: _selectedPrestataire,
-        dateCreation: _formatDate(_creationDate),
-        typeFacturation: _billingType,
-        priorite: _priority,
-        typeMarchandise: _goodsType.text.trim(),
-        lieuMarchandise: _goodsLocation.text.trim(),
-        lieuLivraison: _deliveryLocation.text.trim(),
-        dateArriveeBateau: _arrivalDate == null
-            ? ''
-            : _formatDate(_arrivalDate!),
-        description: _description.text.trim(),
-        conteneurs: containers,
-      ),
-    );
-  }
-}
 
 // --- PAGE CLIENTS ---
 

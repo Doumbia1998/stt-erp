@@ -153,6 +153,7 @@ InvoiceLine _invoiceLineFromJson(Map<String, dynamic> json) => InvoiceLine(
   autresFrais: _num(json['autresFrais']),
   avanceCamion: _num(json['avanceCamion']),
   plaqueVehicule: _str(json['plaqueVehicule']),
+  telephoneChauffeur: _str(json['telephoneChauffeur']),
 );
 
 Map<String, dynamic> _invoiceLineToJson(InvoiceLine line) => {
@@ -170,15 +171,18 @@ Map<String, dynamic> _invoiceLineToJson(InvoiceLine line) => {
   'autresFrais': line.autresFrais,
   'avanceCamion': line.avanceCamion,
   'plaqueVehicule': line.plaqueVehicule,
+  'telephoneChauffeur': line.telephoneChauffeur,
 };
 
 DossierInvoice? _invoiceFromJson(Object? json, DossierInvoiceKind kind) {
   if (json is! Map<String, dynamic>) return null;
   return DossierInvoice(
     id: json['id'] as String,
+    numero: (json['numero'] as num?)?.toInt() ?? 0,
     reference: _str(json['reference']),
     kind: kind,
     description: _str(json['description']),
+    observations: _str(json['observations']),
     montant: _num(json['montant']),
     statut: _str(json['statut']),
     dateEmission: _str(json['dateEmission']),
@@ -193,6 +197,7 @@ Map<String, dynamic> _invoiceToJson(DossierInvoice invoice) => {
   'id': invoice.id,
   'reference': invoice.reference,
   'description': invoice.description,
+  'observations': invoice.observations,
   'montant': invoice.montant,
   'statut': invoice.statut,
   'dateEmission': invoice.dateEmission,
@@ -225,6 +230,7 @@ TransitDossier dossierFromJson(
       lieuMarchandise: _str(json['lieuMarchandise']),
       lieuLivraison: _str(json['lieuLivraison']),
       dateArriveeBateau: _str(json['dateArriveeBateau']),
+      dateLivraisonSouhaitee: _str(json['dateLivraisonSouhaitee']),
       description: _str(json['description']),
       prestataire: prestataires[json['prestataireId']],
       factureClient: _invoiceFromJson(
@@ -249,6 +255,7 @@ TransitDossier dossierFromJson(
             numero: _str(container['numero']),
             type: _str(container['type']),
             marchandise: _str(container['marchandise']),
+            observation: _str(container['observation']),
           ),
       ],
       dateFin: _str(json['dateFin']).isEmpty ? '-' : _str(json['dateFin']),
@@ -260,11 +267,14 @@ TransitDossier dossierFromJson(
             montant: _num(expense['montant']),
             categorie: _str(expense['categorie']),
             date: _str(expense['date']),
+            auteur: _str(expense['auteur']),
+            saisiLe: _str(expense['saisiLe']),
           ),
       ],
       operations: [
         for (final operation in json['operations'] as List? ?? const [])
           DossierOperation(
+            id: operation['id'] as String?,
             type: DossierOperationType.values.byName(
               operation['type'] as String,
             ),
@@ -273,9 +283,17 @@ TransitDossier dossierFromJson(
             montant: _num(operation['montant']),
             date: _str(operation['date']),
             codeJournal: _str(operation['codeJournal']),
+            modePaiement: _str(operation['modePaiement']),
+            numeroCheque: _str(operation['numeroCheque']),
+            observations: _str(operation['observations']),
+            auteur: _str(operation['auteur']),
+            saisiLe: _str(operation['saisiLe']),
           ),
       ],
       version: (json['version'] as num?)?.toInt() ?? 0,
+      numero: (json['numero'] as num?)?.toInt() ?? 0,
+      auteurSaisie: _str(json['auteurSaisie']),
+      dateSaisie: _str(json['dateSaisie']),
     )
     ..transitaireAffecte = prestataires[json['transitaireAffecteId']]
     ..transporteurAffecte = prestataires[json['transporteurAffecteId']];
@@ -295,6 +313,7 @@ Map<String, dynamic> dossierToJson(TransitDossier dossier) => {
   'lieuMarchandise': dossier.lieuMarchandise,
   'lieuLivraison': dossier.lieuLivraison,
   'dateArriveeBateau': dossier.dateArriveeBateau,
+  'dateLivraisonSouhaitee': dossier.dateLivraisonSouhaitee,
   'description': dossier.description,
   'prestataireId': dossier.prestataire?.id,
   'transitaireAffecteId': dossier.transitaireAffecte?.id,
@@ -309,6 +328,7 @@ Map<String, dynamic> dossierToJson(TransitDossier dossier) => {
         'numero': container.numero,
         'type': container.type,
         'marchandise': container.marchandise,
+        'observation': container.observation,
       },
   ],
   'factures': {
@@ -331,7 +351,11 @@ Map<String, dynamic> dossierToJson(TransitDossier dossier) => {
         'categorie': operation.categorie,
         'montant': operation.montant,
         'date': operation.date,
+        'id': operation.id,
         'codeJournal': operation.codeJournal,
+        'modePaiement': operation.modePaiement,
+        'numeroCheque': operation.numeroCheque,
+        'observations': operation.observations,
       },
   ],
   'depenses': [

@@ -169,24 +169,32 @@ test('a dossier is saved with its invoices, movements and version', async () => 
   const created = await call('PUT', '/dossiers/d1', dossierBody());
   assert.equal(created.status, 200);
   assert.equal(created.body.version, 1);
+  assert.equal(created.body.auteurSaisie, 'Administrateur');
+  assert.ok(created.body.numero > 0);
+  assert.match(created.body.dateSaisie, /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/);
 
   const factures = dossierBody().factures;
   factures.client = {
     ...factures.client,
+    reference: 'FAC-STT-1026-0001',
     statut: 'Clôturée',
     montant: 100000,
     dateEmission: '10/10/2026',
+    observations: 'Paiement à 30 jours',
     lignes: [{ description: 'Transport Bamako', quantite: 1, prixUnitaire: 100000 }],
   };
-  const operations = [
-    {
-      type: 'clientPayment',
-      titre: 'Règlement client',
-      montant: 100000,
-      date: '10/10/2026 14:05',
-      codeJournal: 'BQ',
-    },
-  ];
+  const payment = {
+    id: 'op-1',
+    type: 'clientPayment',
+    titre: 'Règlement client',
+    montant: 100000,
+    date: '10/10/2026 14:05',
+    codeJournal: 'BQ',
+    modePaiement: 'Chèque',
+    numeroCheque: 'CHQ-001',
+    observations: 'Solde',
+  };
+  const operations = [payment];
   const updated = await call(
     'PUT',
     '/dossiers/d1',
@@ -199,11 +207,15 @@ test('a dossier is saved with its invoices, movements and version', async () => 
   const stale = await call('PUT', '/dossiers/d1', dossierBody({ version: 1, factures, operations }));
   assert.equal(stale.status, 409);
 
-  // Un règlement déjà enregistré ne peut pas disparaître.
-  const removed = await call('PUT', '/dossiers/d1', dossierBody({ version: 2, factures }));
-  assert.equal(removed.status, 409);
+  // Un règlement enregistré ne peut pas être modifié.
+  const changed = await call(
+    'PUT',
+    '/dossiers/d1',
+    dossierBody({ version: 2, factures, operations: [{ ...payment, montant: 1 }] }),
+  );
+  assert.equal(changed.status, 409);
 
-  // Une facture clôturée ne peut plus être modifiée.
+  // Une facture déjà réglée ne peut plus être modifiée.
   const reopened = await call(
     'PUT',
     '/dossiers/d1',
@@ -215,15 +227,51 @@ test('a dossier is saved with its invoices, movements and version', async () => 
   );
   assert.equal(reopened.status, 409);
 
-  const data = await call('GET', '/donnees');
-  const dossier = data.body.dossiers[0];
+  let data = await call('GET', '/donnees');
+  let dossier = data.body.dossiers[0];
   assert.equal(dossier.version, 2);
   assert.equal(dossier.dateFin, '-');
   assert.equal(dossier.conteneurs[0].numero, 'MSKU1234567');
-  assert.equal(dossier.factures.client.montant, 100000);
+  assert.equal(dossier.factures.client.reference, 'FAC-STT-1026-0001');
+  assert.equal(dossier.factures.client.observations, 'Paiement à 30 jours');
   assert.equal(dossier.factures.client.dateEmission, '10/10/2026');
   assert.equal(dossier.factures.client.lignes[0].description, 'Transport Bamako');
-  assert.deepEqual(dossier.operations[0], { ...operations[0], categorie: '' });
+  const { auteur, saisiLe, ...savedPayment } = dossier.operations[0];
+  assert.deepEqual(savedPayment, { ...payment, categorie: '' });
+  assert.equal(auteur, 'Administrateur');
+
+  // Supprimer le règlement rend la facture de nouveau modifiable.
+  const withoutPayment = await call('PUT', '/dossiers/d1', dossierBody({ version: 2, factures }));
+  assert.equal(withoutPayment.status, 200);
+  const corrected = await call(
+    'PUT',
+    '/dossiers/d1',
+    dossierBody({
+      version: 3,
+      factures: { ...factures, client: { ...factures.client, montant: 90000 } },
+    }),
+  );
+  assert.equal(corrected.status, 200);
+  data = await call('GET', '/donnees');
+  dossier = data.body.dossiers[0];
+  assert.equal(dossier.operations.length, 0);
+  assert.equal(dossier.factures.client.montant, 90000);
+
+  // Un dossier facturé ne peut pas être supprimé ; un dossier vide, si.
+  assert.equal((await call('DELETE', '/dossiers/d1')).status, 409);
+  const emptyFactures = Object.fromEntries(
+    Object.entries(dossierBody().factures).map(([kind, f]) => [
+      kind,
+      { ...f, id: `d3-${kind}`, reference: `${f.reference}-d3` },
+    ]),
+  );
+  assert.equal(
+    (await call('PUT', '/dossiers/d3', dossierBody({ numDossier: 'STT-3', factures: emptyFactures }))).status,
+    200,
+  );
+  assert.equal((await call('DELETE', '/dossiers/d3')).status, 204);
+  data = await call('GET', '/donnees');
+  assert.equal(data.body.dossiers.length, 1);
 
   const invalidDate = await call(
     'PUT',

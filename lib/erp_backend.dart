@@ -43,6 +43,8 @@ class ErpData {
 abstract class ErpBackend {
   // Vérifie l'identifiant et le mot de passe, puis charge toutes les données.
   Future<ErpData> login(String identifiant, String motDePasse);
+  // Recharge toutes les données (bouton « Actualiser »).
+  Future<ErpData> reload();
   Future<void> logout();
 
   Future<void> saveUser(ErpUser user);
@@ -53,8 +55,9 @@ abstract class ErpBackend {
   // [previousCode] : code actuel du journal s'il est renommé.
   Future<void> saveJournal(JournalCode journal, {String? previousCode});
   Future<void> saveVoyage(Voyage voyage);
-  // Met à jour [TransitDossier.version] après l'enregistrement.
+  // Met à jour la version, l'ID et la saisie du dossier après l'enregistrement.
   Future<void> saveDossier(TransitDossier dossier);
+  Future<void> deleteDossier(TransitDossier dossier);
 }
 
 const _apiBaseUrl = String.fromEnvironment(
@@ -111,6 +114,11 @@ class HttpErpBackend implements ErpBackend {
       'motDePasse': motDePasse,
     });
     _token = session['jeton'] as String;
+    return reload();
+  }
+
+  @override
+  Future<ErpData> reload() async {
     final json = await _send('GET', '/donnees') as Map<String, dynamic>;
     List<Map<String, dynamic>> rows(String key) =>
         (json[key] as List).cast<Map<String, dynamic>>();
@@ -195,8 +203,16 @@ class HttpErpBackend implements ErpBackend {
       '/dossiers/${_segment(dossier.id)}',
       dossierToJson(dossier),
     );
-    dossier.version = (result['version'] as num).toInt();
+    dossier
+      ..version = (result['version'] as num).toInt()
+      ..numero = (result['numero'] as num?)?.toInt() ?? dossier.numero
+      ..auteurSaisie = result['auteurSaisie'] as String? ?? dossier.auteurSaisie
+      ..dateSaisie = result['dateSaisie'] as String? ?? dossier.dateSaisie;
   }
+
+  @override
+  Future<void> deleteDossier(TransitDossier dossier) =>
+      _send('DELETE', '/dossiers/${_segment(dossier.id)}');
 }
 
 // Version sans serveur, utilisée par les tests automatiques.
@@ -241,6 +257,8 @@ class MemoryErpBackend implements ErpBackend {
     }
   }
 
+  ErpUser? _user;
+
   @override
   Future<ErpData> login(String identifiant, String motDePasse) async {
     final key = identifiant.trim().toLowerCase();
@@ -251,6 +269,13 @@ class MemoryErpBackend implements ErpBackend {
         status: 401,
       );
     }
+    _user = user;
+    return reload();
+  }
+
+  @override
+  Future<ErpData> reload() async {
+    final user = _user!;
     return ErpData(
       user: user,
       users: user.role == 'Administrateur' ? [...users] : [],
@@ -303,6 +328,15 @@ class MemoryErpBackend implements ErpBackend {
   @override
   Future<void> saveDossier(TransitDossier dossier) async {
     dossier.version += 1;
+    if (dossier.numero == 0) {
+      dossier
+        ..numero = dossiers.length + 1
+        ..auteurSaisie = 'Administrateur';
+    }
     _upsert(dossiers, dossier, (d) => d.id == dossier.id);
   }
+
+  @override
+  Future<void> deleteDossier(TransitDossier dossier) async =>
+      dossiers.removeWhere((d) => d.id == dossier.id);
 }
