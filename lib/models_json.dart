@@ -1,0 +1,346 @@
+// Conversion JSON des modèles pour les échanges avec l'API (api.stt-ml.com).
+import 'models.dart';
+
+double _num(Object? value) => (value as num?)?.toDouble() ?? 0;
+String _str(Object? value) => value as String? ?? '';
+String? _ref(Object? value) =>
+    value is String && value.isNotEmpty ? value : null;
+
+ErpUser erpUserFromJson(Map<String, dynamic> json) => ErpUser(
+  id: json['id'] as String,
+  name: _str(json['nom']),
+  login: _str(json['identifiant']),
+  password: '',
+  role: _str(json['role']),
+  accessModules: {...(json['modules'] as List? ?? const []).cast<String>()},
+);
+
+// Le mot de passe n'est envoyé que s'il a été saisi (sinon le serveur garde l'ancien).
+Map<String, dynamic> erpUserToJson(ErpUser user) => {
+  'nom': user.name,
+  'identifiant': user.login,
+  'role': user.role,
+  'modules': user.accessModules.toList(),
+  if (user.password.isNotEmpty) 'motDePasse': user.password,
+};
+
+Client clientFromJson(Map<String, dynamic> json) => Client(
+  id: json['id'] as String,
+  nom: _str(json['nom']),
+  telephone: _str(json['telephone']),
+  societe: _str(json['societe']),
+  adresse: _str(json['adresse']),
+  email: _str(json['email']),
+  rccm: _str(json['rccm']),
+  soldeInitial: _num(json['soldeInitial']),
+  assujettiTva: json['assujettiTva'] as bool? ?? false,
+  compteComptable: _str(json['compteComptable']),
+);
+
+Map<String, dynamic> clientToJson(Client client) => {
+  'nom': client.nom,
+  'telephone': client.telephone,
+  'societe': client.societe,
+  'adresse': client.adresse,
+  'email': client.email,
+  'rccm': client.rccm,
+  'soldeInitial': client.soldeInitial,
+  'assujettiTva': client.assujettiTva,
+  'compteComptable': client.compteComptable,
+};
+
+Prestataire prestataireFromJson(Map<String, dynamic> json) => Prestataire(
+  id: json['id'] as String,
+  entreprise: _str(json['entreprise']),
+  type: _str(json['type']),
+  pays: _str(json['pays']),
+  villePort: _str(json['villePort']),
+  contact: _str(json['contact']),
+  telephone: _str(json['telephone']),
+  email: _str(json['email']),
+  services: _str(json['services']),
+  adresse: _str(json['adresse']),
+  rccm: _str(json['rccm']),
+  nombreVehicules: (json['nombreVehicules'] as num?)?.toInt() ?? 0,
+  soldeInitial: _num(json['soldeInitial']),
+  compteComptable: _str(json['compteComptable']),
+);
+
+Map<String, dynamic> prestataireToJson(Prestataire provider) => {
+  'entreprise': provider.entreprise,
+  'type': provider.type,
+  'pays': provider.pays,
+  'villePort': provider.villePort,
+  'contact': provider.contact,
+  'telephone': provider.telephone,
+  'email': provider.email,
+  'services': provider.services,
+  'adresse': provider.adresse,
+  'rccm': provider.rccm,
+  'nombreVehicules': provider.nombreVehicules,
+  'soldeInitial': provider.soldeInitial,
+  'compteComptable': provider.compteComptable,
+};
+
+PlanAccount planAccountFromJson(Map<String, dynamic> json) => PlanAccount(
+  id: json['id'] as String,
+  code: _str(json['code']),
+  libelle: _str(json['libelle']),
+  nature: _str(json['nature']),
+  tiersId: _ref(json['tiersId']),
+  soldeInitial: _num(json['soldeInitial']),
+  assujettiTva: json['assujettiTva'] as bool? ?? false,
+);
+
+Map<String, dynamic> planAccountToJson(PlanAccount account) => {
+  'code': account.code,
+  'libelle': account.libelle,
+  'nature': account.nature,
+  'tiersId': account.tiersId,
+  'soldeInitial': account.soldeInitial,
+  'assujettiTva': account.assujettiTva,
+};
+
+JournalCode journalFromJson(Map<String, dynamic> json) => JournalCode(
+  code: _str(json['code']),
+  intitule: _str(json['intitule']),
+  type: _str(json['type']),
+  compteTresorerie: _str(json['compteTresorerie']),
+);
+
+Map<String, dynamic> journalToJson(JournalCode journal) => {
+  'code': journal.code,
+  'intitule': journal.intitule,
+  'type': journal.type,
+  'compteTresorerie': journal.compteTresorerie,
+};
+
+Voyage voyageFromJson(Map<String, dynamic> json) => Voyage(
+  id: json['id'] as String,
+  dossierId: _str(json['dossierId']),
+  plaque: _str(json['plaque']),
+  chauffeur: _str(json['chauffeur']),
+  origine: _str(json['origine']),
+  destination: _str(json['destination']),
+  depart: _str(json['depart']),
+  arriveePrevue: _str(json['arriveePrevue']),
+  statut: _str(json['statut']),
+);
+
+Map<String, dynamic> voyageToJson(Voyage voyage) => {
+  'dossierId': voyage.dossierId,
+  'plaque': voyage.plaque,
+  'chauffeur': voyage.chauffeur,
+  'origine': voyage.origine,
+  'destination': voyage.destination,
+  'depart': voyage.depart,
+  'arriveePrevue': voyage.arriveePrevue,
+  'statut': voyage.statut,
+};
+
+InvoiceLine _invoiceLineFromJson(Map<String, dynamic> json) => InvoiceLine(
+  description: _str(json['description']),
+  quantite: _num(json['quantite']),
+  prixUnitaire: _num(json['prixUnitaire']),
+  numeroConteneur: _str(json['numeroConteneur']),
+  bl: _str(json['bl']),
+  marchandise: _str(json['marchandise']),
+  typeConteneur: _str(json['typeConteneur']),
+  fraisTransit: _num(json['fraisTransit']),
+  volumePoids: _num(json['volumePoids']),
+  surestariesMagasinage: _num(json['surestariesMagasinage']),
+  fraisPeage: _num(json['fraisPeage']),
+  autresFrais: _num(json['autresFrais']),
+  avanceCamion: _num(json['avanceCamion']),
+  plaqueVehicule: _str(json['plaqueVehicule']),
+);
+
+Map<String, dynamic> _invoiceLineToJson(InvoiceLine line) => {
+  'description': line.description,
+  'quantite': line.quantite,
+  'prixUnitaire': line.prixUnitaire,
+  'numeroConteneur': line.numeroConteneur,
+  'bl': line.bl,
+  'marchandise': line.marchandise,
+  'typeConteneur': line.typeConteneur,
+  'fraisTransit': line.fraisTransit,
+  'volumePoids': line.volumePoids,
+  'surestariesMagasinage': line.surestariesMagasinage,
+  'fraisPeage': line.fraisPeage,
+  'autresFrais': line.autresFrais,
+  'avanceCamion': line.avanceCamion,
+  'plaqueVehicule': line.plaqueVehicule,
+};
+
+DossierInvoice? _invoiceFromJson(Object? json, DossierInvoiceKind kind) {
+  if (json is! Map<String, dynamic>) return null;
+  return DossierInvoice(
+    id: json['id'] as String,
+    reference: _str(json['reference']),
+    kind: kind,
+    description: _str(json['description']),
+    montant: _num(json['montant']),
+    statut: _str(json['statut']),
+    dateEmission: _str(json['dateEmission']),
+    lignes: [
+      for (final line in json['lignes'] as List? ?? const [])
+        _invoiceLineFromJson(line as Map<String, dynamic>),
+    ],
+  );
+}
+
+Map<String, dynamic> _invoiceToJson(DossierInvoice invoice) => {
+  'id': invoice.id,
+  'reference': invoice.reference,
+  'description': invoice.description,
+  'montant': invoice.montant,
+  'statut': invoice.statut,
+  'dateEmission': invoice.dateEmission,
+  'lignes': invoice.lignes.map(_invoiceLineToJson).toList(),
+};
+
+TransitDossier dossierFromJson(
+  Map<String, dynamic> json, {
+  required Map<String, Client> clients,
+  required Map<String, Prestataire> prestataires,
+}) {
+  final client = clients[json['clientId']];
+  if (client == null) {
+    throw FormatException('Client introuvable pour le dossier ${json['id']}');
+  }
+  final invoices = json['factures'] as Map<String, dynamic>? ?? const {};
+  return TransitDossier(
+      id: json['id'] as String,
+      numDossier: _str(json['numDossier']),
+      numBL: _str(json['numBL']),
+      numLB: _str(json['numLB']),
+      client: client,
+      nbConteneurs: (json['nbConteneurs'] as num?)?.toInt() ?? 0,
+      dateDebut: _str(json['dateDebut']),
+      transitaire: _str(json['transitaire']),
+      dateCreation: _str(json['dateCreation']),
+      typeFacturation: _str(json['typeFacturation']),
+      priorite: _str(json['priorite']),
+      typeMarchandise: _str(json['typeMarchandise']),
+      lieuMarchandise: _str(json['lieuMarchandise']),
+      lieuLivraison: _str(json['lieuLivraison']),
+      dateArriveeBateau: _str(json['dateArriveeBateau']),
+      description: _str(json['description']),
+      prestataire: prestataires[json['prestataireId']],
+      factureClient: _invoiceFromJson(
+        invoices[DossierInvoiceKind.client.name],
+        DossierInvoiceKind.client,
+      ),
+      facturePrestataire: _invoiceFromJson(
+        invoices[DossierInvoiceKind.provider.name],
+        DossierInvoiceKind.provider,
+      ),
+      factureTransitaire: _invoiceFromJson(
+        invoices[DossierInvoiceKind.forwarder.name],
+        DossierInvoiceKind.forwarder,
+      ),
+      factureTransporteur: _invoiceFromJson(
+        invoices[DossierInvoiceKind.carrier.name],
+        DossierInvoiceKind.carrier,
+      ),
+      conteneurs: [
+        for (final container in json['conteneurs'] as List? ?? const [])
+          TransitContainer(
+            numero: _str(container['numero']),
+            type: _str(container['type']),
+            marchandise: _str(container['marchandise']),
+          ),
+      ],
+      dateFin: _str(json['dateFin']).isEmpty ? '-' : _str(json['dateFin']),
+      statut: _str(json['statut']),
+      depenses: [
+        for (final expense in json['depenses'] as List? ?? const [])
+          Depense(
+            titre: _str(expense['titre']),
+            montant: _num(expense['montant']),
+            categorie: _str(expense['categorie']),
+            date: _str(expense['date']),
+          ),
+      ],
+      operations: [
+        for (final operation in json['operations'] as List? ?? const [])
+          DossierOperation(
+            type: DossierOperationType.values.byName(
+              operation['type'] as String,
+            ),
+            titre: _str(operation['titre']),
+            categorie: _str(operation['categorie']),
+            montant: _num(operation['montant']),
+            date: _str(operation['date']),
+            codeJournal: _str(operation['codeJournal']),
+          ),
+      ],
+      version: (json['version'] as num?)?.toInt() ?? 0,
+    )
+    ..transitaireAffecte = prestataires[json['transitaireAffecteId']]
+    ..transporteurAffecte = prestataires[json['transporteurAffecteId']];
+}
+
+Map<String, dynamic> dossierToJson(TransitDossier dossier) => {
+  'numDossier': dossier.numDossier,
+  'numBL': dossier.numBL,
+  'numLB': dossier.numLB,
+  'clientId': dossier.client.id,
+  'nbConteneurs': dossier.nbConteneurs,
+  'transitaire': dossier.transitaire,
+  'dateCreation': dossier.dateCreation,
+  'typeFacturation': dossier.typeFacturation,
+  'priorite': dossier.priorite,
+  'typeMarchandise': dossier.typeMarchandise,
+  'lieuMarchandise': dossier.lieuMarchandise,
+  'lieuLivraison': dossier.lieuLivraison,
+  'dateArriveeBateau': dossier.dateArriveeBateau,
+  'description': dossier.description,
+  'prestataireId': dossier.prestataire?.id,
+  'transitaireAffecteId': dossier.transitaireAffecte?.id,
+  'transporteurAffecteId': dossier.transporteurAffecte?.id,
+  'dateDebut': dossier.dateDebut,
+  'dateFin': dossier.dateFin,
+  'statut': dossier.statut,
+  'version': dossier.version,
+  'conteneurs': [
+    for (final container in dossier.conteneurs)
+      {
+        'numero': container.numero,
+        'type': container.type,
+        'marchandise': container.marchandise,
+      },
+  ],
+  'factures': {
+    DossierInvoiceKind.client.name: _invoiceToJson(dossier.factureClient),
+    DossierInvoiceKind.provider.name: _invoiceToJson(
+      dossier.facturePrestataire,
+    ),
+    DossierInvoiceKind.forwarder.name: _invoiceToJson(
+      dossier.factureTransitaire,
+    ),
+    DossierInvoiceKind.carrier.name: _invoiceToJson(
+      dossier.factureTransporteur,
+    ),
+  },
+  'operations': [
+    for (final operation in dossier.operations)
+      {
+        'type': operation.type.name,
+        'titre': operation.titre,
+        'categorie': operation.categorie,
+        'montant': operation.montant,
+        'date': operation.date,
+        'codeJournal': operation.codeJournal,
+      },
+  ],
+  'depenses': [
+    for (final expense in dossier.depenses)
+      {
+        'titre': expense.titre,
+        'categorie': expense.categorie,
+        'montant': expense.montant,
+        'date': expense.date,
+      },
+  ],
+};

@@ -1,14 +1,14 @@
 const { after, before, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { once } = require('node:events');
-const { server } = require('../src/server');
+const { createApp } = require('../src/app');
 
+let server;
 let baseUrl;
 
 before(async () => {
-  if (!server.listening) {
-    await once(server, 'listening');
-  }
+  server = createApp({ pool: null }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
 
@@ -26,13 +26,14 @@ test('health endpoint reports the API status', async () => {
 });
 
 test('readiness reports missing database configuration', async () => {
-  if (process.env.DATABASE_URL) {
-    return;
-  }
-
   const response = await fetch(`${baseUrl}/ready`);
   assert.equal(response.status, 503);
   assert.equal((await response.json()).status, 'not_ready');
+});
+
+test('data routes report the missing database', async () => {
+  const response = await fetch(`${baseUrl}/api/v1/donnees`);
+  assert.equal(response.status, 503);
 });
 
 test('unknown routes return a JSON 404', async () => {

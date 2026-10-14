@@ -9,8 +9,105 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:stt/main.dart';
+import 'package:stt/models_json.dart';
 
 void main() {
+  // Les tests n'appellent pas l'API : les données restent en mémoire.
+  setUp(() => erpBackend = MemoryErpBackend());
+
+  test('A dossier survives the JSON round trip used by the API', () {
+    final client = Client(id: 'client-1', nom: 'Client test', telephone: '');
+    final provider = Prestataire(
+      id: 'provider-1',
+      entreprise: 'Transport test',
+      type: 'Transporteur',
+      pays: 'Mali',
+      villePort: 'Bamako',
+      contact: '',
+      telephone: '',
+      email: '',
+      services: '',
+    );
+    final dossier =
+        TransitDossier(
+            id: 'dossier-1',
+            numDossier: 'STT-TEST',
+            numBL: 'BL-1',
+            numLB: '',
+            client: client,
+            prestataire: provider,
+            nbConteneurs: 1,
+            dateDebut: '09/10/2026',
+            conteneurs: const [
+              TransitContainer(
+                numero: 'MSKU1234567',
+                type: '40 pieds',
+                marchandise: 'Riz',
+              ),
+            ],
+            version: 3,
+          )
+          ..transporteurAffecte = provider
+          ..depenses.add(
+            Depense(
+              titre: 'Péage',
+              montant: 5000,
+              categorie: 'Route',
+              date: '10/10/2026 08:30',
+            ),
+          )
+          ..operations.add(
+            const DossierOperation(
+              type: DossierOperationType.clientPayment,
+              titre: 'Règlement',
+              montant: 100000,
+              date: '10/10/2026 09:00',
+              codeJournal: 'BQ',
+            ),
+          );
+    dossier.factureClient
+      ..statut = 'Clôturée'
+      ..montant = 100000
+      ..dateEmission = '10/10/2026'
+      ..lignes = const [
+        InvoiceLine(
+          description: 'Transport Bamako',
+          quantite: 1,
+          prixUnitaire: 100000,
+        ),
+      ];
+
+    final json = dossierToJson(dossier)..['id'] = dossier.id;
+    final restored = dossierFromJson(
+      json,
+      clients: {client.id: client},
+      prestataires: {provider.id: provider},
+    );
+
+    expect(restored.client, same(client));
+    expect(restored.prestataire, same(provider));
+    expect(restored.transporteurAffecte, same(provider));
+    expect(restored.version, 3);
+    expect(restored.conteneurs.single.numero, 'MSKU1234567');
+    expect(restored.factureClient.statut, 'Clôturée');
+    expect(restored.factureClient.lignes.single.total, 100000);
+    expect(restored.depenses.single.date, '10/10/2026 08:30');
+    expect(restored.operations.single.codeJournal, 'BQ');
+    expect(restored.soldeClient, 0);
+  });
+
+  testWidgets('Wrong credentials keep the user on the login page', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(const TransitTrackerApp());
+    await tester.enterText(find.byType(TextField).at(0), 'admin');
+    await tester.enterText(find.byType(TextField).at(1), 'mauvais');
+    await tester.tap(find.text('SE CONNECTER'));
+    await tester.pumpAndSettle();
+    expect(find.text('Identifiant ou mot de passe incorrect.'), findsOneWidget);
+    expect(find.text('SE CONNECTER'), findsOneWidget);
+  });
+
   testWidgets('ERP modules expose their pages from the top dropdowns', (
     WidgetTester tester,
   ) async {
@@ -391,6 +488,14 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    (erpBackend as MemoryErpBackend).comptes.add(
+      PlanAccount(
+        id: 'account-401001',
+        code: '401001',
+        libelle: 'Transport Dakar',
+        nature: 'Fournisseur',
+      ),
+    );
 
     await tester.pumpWidget(const TransitTrackerApp());
     await tester.enterText(find.byType(TextField).at(0), 'admin');

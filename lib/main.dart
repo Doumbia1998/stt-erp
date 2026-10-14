@@ -4,6 +4,12 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:intl/intl.dart';
 
+import 'erp_backend.dart';
+import 'models.dart';
+
+export 'erp_backend.dart' show ErpBackend, MemoryErpBackend, erpBackend;
+export 'models.dart';
+
 // Fonction globale pour formater les montants
 String formatCurrency(double amount) {
   return NumberFormat('#,###', 'fr_FR').format(amount).replaceAll(',', ' ');
@@ -27,6 +33,34 @@ Future<void> _showDuplicateAlert(BuildContext context, String subject) async {
     context,
     title: 'Doublon détecté',
     message: '$subject existe déjà. Vérifiez les informations saisies.',
+  );
+}
+
+// Enregistre via l'API ; en cas d'échec, affiche la raison et renvoie false.
+Future<bool> _persist(
+  BuildContext context,
+  Future<void> Function() save,
+) async {
+  try {
+    await save();
+    return true;
+  } on ErpBackendException catch (error) {
+    if (context.mounted) {
+      await _showInfoAlert(
+        context,
+        title: 'Enregistrement impossible',
+        message: error.message,
+      );
+    }
+    return false;
+  }
+}
+
+void _logout(BuildContext context) {
+  erpBackend.logout();
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(builder: (_) => const LoginPage()),
   );
 }
 
@@ -54,44 +88,38 @@ void main() {
   runApp(const TransitTrackerApp());
 }
 
-const _moduleNames = [
-  'Gestion',
-  'Prestation',
-  'Recouvrement',
-  'Transport',
-  'Transitaire',
-  'Comptabilité',
-  'RH & Paie',
-];
+// Données de l'ERP, chargées depuis l'API à la connexion.
+final List<ErpUser> _erpUsers = [];
+final List<Client> _clients = [];
+final List<TransitDossier> _dossiers = [];
+final List<Prestataire> _prestataires = [];
+final List<PlanAccount> _planAccounts = [];
+final List<JournalCode> _journalCodes = [];
+final List<Voyage> _voyages = [];
 
-class ErpUser {
-  final String id;
-  String name;
-  String login;
-  String password;
-  String role;
-  Set<String> accessModules;
-
-  ErpUser({
-    required this.id,
-    required this.name,
-    required this.login,
-    required this.password,
-    required this.role,
-    required this.accessModules,
-  });
+void _loadErpData(ErpData data) {
+  _erpUsers
+    ..clear()
+    ..addAll(data.users);
+  _clients
+    ..clear()
+    ..addAll(data.clients);
+  _dossiers
+    ..clear()
+    ..addAll(data.dossiers);
+  _prestataires
+    ..clear()
+    ..addAll(data.prestataires);
+  _planAccounts
+    ..clear()
+    ..addAll(data.comptes);
+  _journalCodes
+    ..clear()
+    ..addAll(data.journaux);
+  _voyages
+    ..clear()
+    ..addAll(data.voyages);
 }
-
-final List<ErpUser> _erpUsers = [
-  ErpUser(
-    id: 'admin',
-    name: 'Administrateur',
-    login: 'admin',
-    password: '1234',
-    role: 'Administrateur',
-    accessModules: _moduleNames.toSet(),
-  ),
-];
 
 class TransitTrackerApp extends StatelessWidget {
   const TransitTrackerApp({super.key});
@@ -124,30 +152,31 @@ class _LoginPageState extends State<LoginPage> {
   final _userCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   bool _obscure = true;
+  bool _loading = false;
 
-  void _login() {
-    final matches = _erpUsers.where(
-      (entry) =>
-          _normalizeUniqueValue(entry.login) ==
-              _normalizeUniqueValue(_userCtrl.text) &&
-          entry.password == _passCtrl.text,
-    );
-    if (matches.isNotEmpty) {
-      final account = matches.first;
+  Future<void> _login() async {
+    if (_loading) return;
+    setState(() => _loading = true);
+    try {
+      final data = await erpBackend.login(_userCtrl.text, _passCtrl.text);
+      if (!mounted) return;
+      _loadErpData(data);
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (context) => MainNavigationPage(
-            userDisplayName: account.name,
-            userRole: account.role,
-            authorizedModules: account.accessModules,
+            userDisplayName: data.user.name,
+            userRole: data.user.role,
+            authorizedModules: data.user.accessModules,
           ),
         ),
       );
-    } else {
+    } on ErpBackendException catch (error) {
+      if (!mounted) return;
+      setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Identifiant ou mot de passe incorrect.'),
+        SnackBar(
+          content: Text(error.message),
           backgroundColor: Colors.redAccent,
         ),
       );
@@ -237,6 +266,7 @@ class _LoginPageState extends State<LoginPage> {
                         TextField(
                           controller: _passCtrl,
                           obscureText: _obscure,
+                          onSubmitted: (_) => _login(),
                           decoration: InputDecoration(
                             labelText: "Mot de passe",
                             prefixIcon: const Icon(Icons.lock_outline),
@@ -280,13 +310,21 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                               elevation: 5,
                             ),
-                            child: const Text(
-                              "SE CONNECTER",
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                            child: _loading
+                                ? const SizedBox.square(
+                                    dimension: 24,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 3,
+                                    ),
+                                  )
+                                : const Text(
+                                    "SE CONNECTER",
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                           ),
                         ),
                       ],
@@ -300,52 +338,6 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
-}
-
-// --- MODÈLES ---
-
-class Client {
-  final String id, nom, telephone;
-  final String societe;
-  final String adresse;
-  final String email;
-  final String rccm;
-  final double soldeInitial;
-  final bool assujettiTva;
-  String compteComptable;
-
-  Client({
-    required this.id,
-    required this.nom,
-    required this.telephone,
-    this.societe = '',
-    this.adresse = '',
-    this.email = '',
-    this.rccm = '',
-    this.soldeInitial = 0,
-    this.assujettiTva = false,
-    this.compteComptable = '',
-  });
-}
-
-class PlanAccount {
-  final String id;
-  String code;
-  String libelle;
-  String nature;
-  String? tiersId;
-  final double soldeInitial;
-  final bool assujettiTva;
-
-  PlanAccount({
-    required this.id,
-    required this.code,
-    required this.libelle,
-    required this.nature,
-    this.tiersId,
-    this.soldeInitial = 0,
-    this.assujettiTva = false,
-  });
 }
 
 const _accountNatures = [
@@ -364,335 +356,6 @@ const _accountNatures = [
   'Charge',
   'Produit',
 ];
-
-class Depense {
-  final String titre, categorie, date;
-  final double montant;
-  Depense({
-    required this.titre,
-    required this.montant,
-    required this.categorie,
-    required this.date,
-  });
-}
-
-enum DossierOperationType {
-  expense,
-  clientInvoice,
-  clientPayment,
-  providerInvoice,
-  providerAdvance,
-  providerPayment,
-}
-
-enum DossierInvoiceKind { client, provider, forwarder, carrier }
-
-enum SettlementKind { client, supplier, forwarder, carrier }
-
-class Voyage {
-  final String id;
-  String dossierId;
-  String plaque;
-  String chauffeur;
-  String origine;
-  String destination;
-  String depart;
-  String arriveePrevue;
-  String statut;
-
-  Voyage({
-    required this.id,
-    required this.dossierId,
-    required this.plaque,
-    required this.chauffeur,
-    required this.origine,
-    required this.destination,
-    required this.depart,
-    required this.arriveePrevue,
-    required this.statut,
-  });
-}
-
-class InvoiceLine {
-  final String description;
-  final double quantite;
-  final double prixUnitaire;
-  final String numeroConteneur;
-  final String bl;
-  final String marchandise;
-  final String typeConteneur;
-  final double fraisTransit;
-  final double volumePoids;
-  final double surestariesMagasinage;
-  final double fraisPeage;
-  final double autresFrais;
-  final double avanceCamion;
-  final String plaqueVehicule;
-
-  const InvoiceLine({
-    required this.description,
-    required this.quantite,
-    required this.prixUnitaire,
-    this.numeroConteneur = '',
-    this.bl = '',
-    this.marchandise = '',
-    this.typeConteneur = '',
-    this.fraisTransit = 0,
-    this.volumePoids = 0,
-    this.surestariesMagasinage = 0,
-    this.fraisPeage = 0,
-    this.autresFrais = 0,
-    this.avanceCamion = 0,
-    this.plaqueVehicule = '',
-  });
-
-  double get total => quantite * prixUnitaire;
-  double get totalPrestataire =>
-      fraisTransit +
-      volumePoids +
-      surestariesMagasinage +
-      fraisPeage +
-      autresFrais;
-}
-
-class DossierInvoice {
-  final String id;
-  final String reference;
-  final DossierInvoiceKind kind;
-  String description;
-  double montant;
-  String statut;
-  String dateEmission;
-  List<InvoiceLine> lignes;
-
-  DossierInvoice({
-    required this.id,
-    required this.reference,
-    required this.kind,
-    this.description = '',
-    this.montant = 0,
-    this.statut = 'Brouillon',
-    this.dateEmission = '',
-    List<InvoiceLine>? lignes,
-  }) : lignes = lignes ?? [];
-}
-
-class JournalCode {
-  String code;
-  String intitule;
-  String type;
-  String compteTresorerie;
-
-  JournalCode({
-    required this.code,
-    required this.intitule,
-    required this.type,
-    required this.compteTresorerie,
-  });
-}
-
-class DossierOperation {
-  final DossierOperationType type;
-  final String titre;
-  final String categorie;
-  final double montant;
-  final String date;
-  final String codeJournal;
-
-  const DossierOperation({
-    required this.type,
-    required this.titre,
-    this.categorie = '',
-    required this.montant,
-    required this.date,
-    this.codeJournal = '',
-  });
-}
-
-class TransitDossier {
-  final String id, numDossier, numBL, numLB;
-  final Client client;
-  final int nbConteneurs;
-  final String transitaire;
-  final String dateCreation;
-  final String typeFacturation;
-  final String priorite;
-  final String typeMarchandise;
-  final String lieuMarchandise;
-  final String lieuLivraison;
-  final String dateArriveeBateau;
-  final String description;
-  final List<TransitContainer> conteneurs;
-  Prestataire? prestataire;
-  Prestataire? transitaireAffecte;
-  Prestataire? transporteurAffecte;
-  final DossierInvoice factureClient;
-  final DossierInvoice facturePrestataire;
-  final DossierInvoice factureTransitaire;
-  final DossierInvoice factureTransporteur;
-  String dateDebut, dateFin, statut;
-  List<Depense> depenses;
-  List<DossierOperation> operations;
-
-  TransitDossier({
-    required this.id,
-    required this.numDossier,
-    required this.numBL,
-    required this.numLB,
-    required this.client,
-    required this.nbConteneurs,
-    required this.dateDebut,
-    this.transitaire = '',
-    this.dateCreation = '',
-    this.typeFacturation = 'Tarif complet',
-    this.priorite = 'Priorité normale',
-    this.typeMarchandise = '',
-    this.lieuMarchandise = '',
-    this.lieuLivraison = '',
-    this.dateArriveeBateau = '',
-    this.description = '',
-    this.prestataire,
-    DossierInvoice? factureClient,
-    DossierInvoice? facturePrestataire,
-    DossierInvoice? factureTransitaire,
-    DossierInvoice? factureTransporteur,
-    List<TransitContainer>? conteneurs,
-    this.dateFin = "-",
-    this.statut = "Ouvert",
-    List<Depense>? depenses,
-    List<DossierOperation>? operations,
-  }) : factureClient =
-           factureClient ??
-           DossierInvoice(
-             id: '$id-client',
-             reference: 'FC-$numDossier',
-             kind: DossierInvoiceKind.client,
-           ),
-       facturePrestataire =
-           facturePrestataire ??
-           DossierInvoice(
-             id: '$id-provider',
-             reference: 'FP-$numDossier',
-             kind: DossierInvoiceKind.provider,
-           ),
-       factureTransitaire =
-           factureTransitaire ??
-           DossierInvoice(
-             id: '$id-forwarder',
-             reference: 'FT-$numDossier',
-             kind: DossierInvoiceKind.forwarder,
-           ),
-       factureTransporteur =
-           factureTransporteur ??
-           DossierInvoice(
-             id: '$id-carrier',
-             reference: 'FTR-$numDossier',
-             kind: DossierInvoiceKind.carrier,
-           ),
-       conteneurs = conteneurs ?? [],
-       depenses = depenses ?? [],
-       operations = operations ?? [];
-
-  double get totalDepenses =>
-      depenses.fold(0, (sum, item) => sum + item.montant);
-
-  double get totalFacturesClient =>
-      (factureClient.statut == 'Clôturée' ? factureClient.montant : 0) +
-      operations
-          .where((entry) => entry.type == DossierOperationType.clientInvoice)
-          .fold(0, (sum, entry) => sum + entry.montant);
-
-  double get totalReglementsClient => operations
-      .where((entry) => entry.type == DossierOperationType.clientPayment)
-      .fold(0, (sum, entry) => sum + entry.montant);
-
-  double get soldeClient => totalFacturesClient - totalReglementsClient;
-
-  double get totalFacturesPrestataire =>
-      (facturePrestataire.statut == 'Clôturée'
-          ? facturePrestataire.montant
-          : 0) +
-      (factureTransitaire.statut == 'Clôturée'
-          ? factureTransitaire.montant
-          : 0) +
-      (factureTransporteur.statut == 'Clôturée'
-          ? factureTransporteur.montant
-          : 0) +
-      operations
-          .where((entry) => entry.type == DossierOperationType.providerInvoice)
-          .fold(0, (sum, entry) => sum + entry.montant);
-
-  double get totalAvancesPrestataire => operations
-      .where((entry) => entry.type == DossierOperationType.providerAdvance)
-      .fold(0, (sum, entry) => sum + entry.montant);
-
-  double get totalReglementsPrestataire => operations
-      .where((entry) => entry.type == DossierOperationType.providerPayment)
-      .fold(0, (sum, entry) => sum + entry.montant);
-
-  double get soldePrestataire =>
-      totalFacturesPrestataire -
-      totalAvancesPrestataire -
-      totalReglementsPrestataire;
-
-  bool get peutCloturer =>
-      statut != 'Clôturé' &&
-      prestataire != null &&
-      factureClient.statut == 'Clôturée' &&
-      (prestataire!.type == 'Transitaire'
-          ? factureTransitaire.statut == 'Clôturée'
-          : prestataire!.type == 'Transporteur'
-          ? factureTransporteur.statut == 'Clôturée'
-          : facturePrestataire.statut == 'Clôturée') &&
-      soldeClient <= 0 &&
-      soldePrestataire <= 0;
-}
-
-class TransitContainer {
-  final String numero;
-  final String type;
-  final String marchandise;
-
-  const TransitContainer({
-    required this.numero,
-    required this.type,
-    required this.marchandise,
-  });
-}
-
-class Prestataire {
-  final String id;
-  final String entreprise;
-  final String type;
-  final String pays;
-  final String villePort;
-  final String contact;
-  final String telephone;
-  final String email;
-  final String services;
-  final String adresse;
-  final String rccm;
-  final int nombreVehicules;
-  final double soldeInitial;
-  String compteComptable;
-
-  Prestataire({
-    required this.id,
-    required this.entreprise,
-    required this.type,
-    required this.pays,
-    required this.villePort,
-    required this.contact,
-    required this.telephone,
-    required this.email,
-    required this.services,
-    this.adresse = '',
-    this.rccm = '',
-    this.nombreVehicules = 0,
-    this.soldeInitial = 0,
-    this.compteComptable = '',
-  });
-}
 
 class SearchableDropdownFormField<T extends Object> extends StatefulWidget {
   final List<T> options;
@@ -868,12 +531,6 @@ class MainNavigationPage extends StatefulWidget {
 
 class _MainNavigationPageState extends State<MainNavigationPage> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
-  static final List<Client> _clients = [];
-  static final List<TransitDossier> _dossiers = [];
-  static final List<Prestataire> _prestataires = [];
-  static final List<PlanAccount> _planAccounts = [];
-  static final List<JournalCode> _journalCodes = [];
-  static final List<Voyage> _voyages = [];
 
   static const List<ErpModule> _modules = [
     ErpModule('Gestion', Icons.space_dashboard_rounded, [
@@ -1327,12 +984,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           PopupMenuButton<String>(
             tooltip: 'Profil utilisateur',
             onSelected: (value) {
-              if (value == 'logout') {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LoginPage()),
-                );
-              }
+              if (value == 'logout') _logout(context);
             },
             itemBuilder: (context) => [
               PopupMenuItem<String>(
@@ -1372,10 +1024,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           ),
           IconButton(
             tooltip: 'Se déconnecter',
-            onPressed: () => Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const LoginPage()),
-            ),
+            onPressed: () => _logout(context),
             icon: const Icon(Icons.logout_rounded, color: Colors.white),
           ),
         ],
@@ -1729,6 +1378,10 @@ class _UserManagementPageState extends State<UserManagementPage> {
       ),
     );
     if (result == null || !mounted) return;
+    if (!await _persist(context, () => erpBackend.saveUser(result))) return;
+    // Le mot de passe saisi est chiffré par le serveur : on ne le garde pas en mémoire.
+    result.password = '';
+    if (!mounted) return;
     setState(() {
       final index = widget.users.indexWhere((user) => user.id == result.id);
       if (index < 0) {
@@ -1763,6 +1416,8 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
   late String _role;
   late Set<String> _access;
 
+  static const _minPasswordLength = 8;
+
   static const _roles = [
     'Administrateur',
     'Direction',
@@ -1783,7 +1438,6 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
     if (user != null) {
       _name.text = user.name;
       _login.text = user.login;
-      _password.text = user.password;
     }
   }
 
@@ -1830,16 +1484,30 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
                 key: const ValueKey('user-password'),
                 controller: _password,
                 obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Mot de passe',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: widget.initial == null
+                      ? 'Mot de passe'
+                      : 'Nouveau mot de passe',
+                  helperText: widget.initial == null
+                      ? 'Au moins $_minPasswordLength caractères'
+                      : 'Laissez vide pour conserver le mot de passe actuel',
+                  border: const OutlineInputBorder(),
                 ),
-                validator: (value) => value == null || value.isEmpty
-                    ? 'Saisissez un mot de passe'
-                    : null,
+                validator: (value) {
+                  final password = value ?? '';
+                  if (password.isEmpty) {
+                    return widget.initial == null
+                        ? 'Saisissez un mot de passe'
+                        : null;
+                  }
+                  return password.length < _minPasswordLength
+                      ? 'Au moins $_minPasswordLength caractères'
+                      : null;
+                },
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 key: const ValueKey('user-role'),
                 initialValue: _role,
                 decoration: const InputDecoration(
@@ -2071,6 +1739,7 @@ class _CashControlPageState extends State<CashControlPage> {
                       ),
                       const SizedBox(height: 24),
                       DropdownButtonFormField<JournalCode?>(
+                        isExpanded: true,
                         key: const ValueKey('cash-journal-filter'),
                         initialValue: _journal,
                         decoration: const InputDecoration(
@@ -2688,7 +2357,7 @@ class _SettlementEntryPageState extends State<SettlementEntryPage> {
     if (date != null && mounted) setState(() => _date = date);
   }
 
-  void _register() {
+  Future<void> _register() async {
     final dossier = _dossier;
     final journal = _journal;
     final amount = double.tryParse(
@@ -2723,8 +2392,13 @@ class _SettlementEntryPageState extends State<SettlementEntryPage> {
       date: DateFormat('dd/MM/yyyy HH:mm').format(_date),
       codeJournal: journal.code,
     );
+    dossier.operations.add(operation);
+    if (!await _persist(context, () => erpBackend.saveDossier(dossier))) {
+      dossier.operations.remove(operation);
+      return;
+    }
+    if (!mounted) return;
     setState(() {
-      dossier.operations.add(operation);
       _piece.clear();
       _label.clear();
       _amount.clear();
@@ -2884,6 +2558,8 @@ class _VoyagesPageState extends State<VoyagesPage> {
           _VoyageFormDialog(dossiers: widget.dossiers, initial: initial),
     );
     if (voyage == null || !mounted) return;
+    if (!await _persist(context, () => erpBackend.saveVoyage(voyage))) return;
+    if (!mounted) return;
     setState(() {
       final index = widget.voyages.indexWhere((entry) => entry.id == voyage.id);
       if (index < 0) {
@@ -2965,6 +2641,7 @@ class _VoyageFormDialogState extends State<_VoyageFormDialog> {
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<TransitDossier>(
+                isExpanded: true,
                 initialValue: _dossier,
                 decoration: const InputDecoration(
                   labelText: 'Dossier',
@@ -2989,9 +2666,10 @@ class _VoyageFormDialogState extends State<_VoyageFormDialog> {
               _field(_driver, 'Nom du chauffeur'),
               _field(_origin, 'Lieu de départ'),
               _field(_destination, 'Destination'),
-              _field(_depart, 'Date de départ'),
-              _field(_arrival, 'Date d’arrivée prévue'),
+              _field(_depart, 'Date de départ', isDate: true),
+              _field(_arrival, 'Date d’arrivée prévue', isDate: true),
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 initialValue: _status,
                 decoration: const InputDecoration(
                   labelText: 'Statut du voyage',
@@ -3021,19 +2699,39 @@ class _VoyageFormDialogState extends State<_VoyageFormDialog> {
     ],
   );
 
-  Widget _field(TextEditingController controller, String label) => Padding(
+  Widget _field(
+    TextEditingController controller,
+    String label, {
+    bool isDate = false,
+  }) => Padding(
     padding: const EdgeInsets.only(bottom: 10),
     child: TextFormField(
       controller: controller,
       decoration: InputDecoration(
         labelText: label,
+        hintText: isDate ? 'jj/mm/aaaa' : null,
         border: const OutlineInputBorder(),
       ),
-      validator: (value) => value == null || value.trim().isEmpty
-          ? 'Ce champ est obligatoire'
-          : null,
+      validator: (value) {
+        final text = value?.trim() ?? '';
+        if (text.isEmpty) return 'Ce champ est obligatoire';
+        if (isDate && !_isValidFrenchDate(text)) {
+          return 'Date invalide (format jj/mm/aaaa)';
+        }
+        return null;
+      },
     ),
   );
+
+  static bool _isValidFrenchDate(String value) {
+    final match = RegExp(r'^(\d{1,2})/(\d{1,2})/(\d{4})$').firstMatch(value);
+    if (match == null) return false;
+    final day = int.parse(match.group(1)!);
+    final month = int.parse(match.group(2)!);
+    final year = int.parse(match.group(3)!);
+    final date = DateTime(year, month, day);
+    return date.year == year && date.month == month && date.day == day;
+  }
 
   void _save() {
     if (!_formKey.currentState!.validate()) return;
@@ -3847,6 +3545,8 @@ class _PlanComptablePageState extends State<PlanComptablePage> {
           _PlanAccountFormDialog(accounts: widget.comptes, initial: initial),
     );
     if (account == null || !mounted) return;
+    if (!await _persist(context, () => erpBackend.saveAccount(account))) return;
+    if (!mounted) return;
     setState(() {
       if (initial == null) {
         widget.comptes.add(account);
@@ -3915,11 +3615,12 @@ class _PlanComptablePageState extends State<PlanComptablePage> {
         ],
       ),
     );
-    if (confirmed == true && mounted) {
-      setState(
-        () => widget.comptes.removeWhere((item) => item.id == account.id),
-      );
+    if (confirmed != true || !mounted) return;
+    if (!await _persist(context, () => erpBackend.deleteAccount(account))) {
+      return;
     }
+    if (!mounted) return;
+    setState(() => widget.comptes.removeWhere((item) => item.id == account.id));
   }
 }
 
@@ -4000,6 +3701,7 @@ class _PlanAccountFormDialogState extends State<_PlanAccountFormDialog> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 key: const ValueKey('plan-account-nature'),
                 initialValue: _nature,
                 onChanged: widget.initial?.tiersId != null
@@ -4171,7 +3873,7 @@ class _PrestatairesPageState extends State<PrestatairesPage> {
               Expanded(
                 child: filtered.isEmpty
                     ? Center(
-                        child: Padding(
+                        child: SingleChildScrollView(
                           padding: const EdgeInsets.all(24),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
@@ -4290,7 +3992,14 @@ class _PrestatairesPageState extends State<PrestatairesPage> {
         initial: initial,
       ),
     );
-    if (prestataire != null && mounted) {
+    if (prestataire == null || !mounted) return;
+    if (!await _persist(
+      context,
+      () => erpBackend.savePrestataire(prestataire),
+    )) {
+      return;
+    }
+    if (mounted) {
       setState(() {
         final index = widget.prestataires.indexWhere(
           (item) => item.id == prestataire.id,
@@ -4713,7 +4422,14 @@ class _JournalCodesPageState extends State<JournalCodesPage> {
         initial: initial,
       ),
     );
-    if (journal != null && mounted) {
+    if (journal == null || !mounted) return;
+    if (!await _persist(
+      context,
+      () => erpBackend.saveJournal(journal, previousCode: initial?.code),
+    )) {
+      return;
+    }
+    if (mounted) {
       setState(() {
         if (initial == null) {
           widget.journals.add(journal);
@@ -4816,6 +4532,7 @@ class _JournalCodeFormDialogState extends State<_JournalCodeFormDialog> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 initialValue: _type,
                 decoration: const InputDecoration(
                   labelText: 'Type de journal *',
@@ -5826,7 +5543,7 @@ class _DossierInvoiceDetailPageState extends State<DossierInvoiceDetailPage> {
     return result;
   }
 
-  void _saveAndExit() {
+  Future<void> _saveAndExit() async {
     final lines = _readLines(requireComplete: false);
     if (lines == null) return;
     if (!_isClient && _selectedPrestataire == null) {
@@ -5837,7 +5554,13 @@ class _DossierInvoiceDetailPageState extends State<DossierInvoiceDetailPage> {
     if (widget.invoice.statut != 'Clôturée') {
       widget.invoice.statut = lines.isEmpty ? 'Brouillon' : 'En cours';
     }
-    Navigator.pop(context, true);
+    if (!await _persist(
+      context,
+      () => erpBackend.saveDossier(widget.dossier),
+    )) {
+      return;
+    }
+    if (mounted) Navigator.pop(context, true);
   }
 
   Future<void> _closeInvoice() async {
@@ -5868,10 +5591,22 @@ class _DossierInvoiceDetailPageState extends State<DossierInvoiceDetailPage> {
     );
     if (confirmed != true || !mounted) return;
     _saveLines(lines);
+    final previousStatus = widget.invoice.statut;
+    final previousDate = widget.invoice.dateEmission;
     widget.invoice
       ..statut = 'Clôturée'
       ..dateEmission = DateFormat('dd/MM/yyyy').format(DateTime.now());
-    Navigator.pop(context, true);
+    if (!await _persist(
+      context,
+      () => erpBackend.saveDossier(widget.dossier),
+    )) {
+      // La facture reste modifiable tant que la clôture n'est pas enregistrée.
+      widget.invoice
+        ..statut = previousStatus
+        ..dateEmission = previousDate;
+      return;
+    }
+    if (mounted) Navigator.pop(context, true);
   }
 
   void _saveLines(List<InvoiceLine> lines) {
@@ -6094,10 +5829,7 @@ class _DashboardPageState extends State<DashboardPage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () => Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const LoginPage()),
-            ),
+            onPressed: () => _logout(context),
           ),
         ],
         bottom: PreferredSize(
@@ -6202,9 +5934,9 @@ class _DashboardPageState extends State<DashboardPage> {
         prestataires: widget.prestataires,
       ),
     );
-    if (dossier != null && mounted) {
-      setState(() => widget.dossiers.add(dossier));
-    }
+    if (dossier == null || !mounted) return;
+    if (!await _persist(context, () => erpBackend.saveDossier(dossier))) return;
+    if (mounted) setState(() => widget.dossiers.add(dossier));
   }
 }
 
@@ -7021,7 +6753,9 @@ class _ClientsPageState extends State<ClientsPage> {
         initial: initial,
       ),
     );
-    if (client != null && mounted) {
+    if (client == null || !mounted) return;
+    if (!await _persist(context, () => erpBackend.saveClient(client))) return;
+    if (mounted) {
       setState(() {
         final index = widget.clients.indexWhere((item) => item.id == client.id);
         if (index < 0) {
@@ -7928,13 +7662,21 @@ class _DetailsDossierPageState extends State<DetailsDossierPage> {
         ],
       ),
     );
-    if (confirmed == true && mounted && widget.dossier.peutCloturer) {
-      setState(() {
-        widget.dossier
-          ..statut = 'Clôturé'
-          ..dateFin = DateFormat('dd/MM/yyyy').format(DateTime.now());
-      });
+    if (confirmed != true || !mounted || !widget.dossier.peutCloturer) return;
+    final previousStatus = widget.dossier.statut;
+    final previousEnd = widget.dossier.dateFin;
+    widget.dossier
+      ..statut = 'Clôturé'
+      ..dateFin = DateFormat('dd/MM/yyyy').format(DateTime.now());
+    if (!await _persist(
+      context,
+      () => erpBackend.saveDossier(widget.dossier),
+    )) {
+      widget.dossier
+        ..statut = previousStatus
+        ..dateFin = previousEnd;
     }
+    if (mounted) setState(() {});
   }
 
   Future<void> _addOperation() async {
@@ -7948,20 +7690,28 @@ class _DetailsDossierPageState extends State<DetailsDossierPage> {
     );
     if (entry == null || !mounted) return;
 
-    setState(() {
-      if (entry.type == DossierOperationType.expense) {
-        widget.dossier.depenses.add(
-          Depense(
+    final dossier = widget.dossier;
+    final expense = entry.type == DossierOperationType.expense
+        ? Depense(
             titre: entry.titre,
             montant: entry.montant,
             categorie: entry.categorie,
             date: entry.date,
-          ),
-        );
+          )
+        : null;
+    if (expense != null) {
+      dossier.depenses.add(expense);
+    } else {
+      dossier.operations.add(entry);
+    }
+    if (!await _persist(context, () => erpBackend.saveDossier(dossier))) {
+      if (expense != null) {
+        dossier.depenses.remove(expense);
       } else {
-        widget.dossier.operations.add(entry);
+        dossier.operations.remove(entry);
       }
-    });
+    }
+    if (mounted) setState(() {});
   }
 }
 
@@ -8066,6 +7816,7 @@ class _DossierOperationDialogState extends State<_DossierOperationDialog> {
                 if (widget.journals.isNotEmpty) ...[
                   const SizedBox(height: 14),
                   DropdownButtonFormField<JournalCode?>(
+                    isExpanded: true,
                     key: const ValueKey('operation-journal'),
                     initialValue: _journal,
                     decoration: const InputDecoration(
