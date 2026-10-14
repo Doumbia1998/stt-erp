@@ -1,0 +1,12 @@
+.git
+.dart_tool
+build
+backend
+android
+ios
+linux
+macos
+windows
+skills
+.claude
+**/node_modules
