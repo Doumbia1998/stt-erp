@@ -33,7 +33,8 @@ List<PlanAccount> _accountsForTiers(
         .where(
           (a) =>
               (a.nature == nature || a.code.startsWith(classPrefix)) &&
-              (a.tiersId == null || a.tiersId == tiersId),
+              ((tiersId != null && a.tiersId == tiersId) ||
+                  (a.tiersId == null && !isGeneralAccountCode(a.code))),
         )
         .toList()
       ..sort((a, b) => a.code.compareTo(b.code));

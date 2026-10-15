@@ -969,6 +969,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                                 color: selected
                                     ? Colors.white
                                     : Colors.white.withValues(alpha: 0.88),
+                                fontSize: 16,
                                 fontWeight: selected
                                     ? FontWeight.bold
                                     : FontWeight.w500,
@@ -977,7 +978,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                             const Icon(
                               Icons.arrow_drop_down,
                               color: Colors.white,
-                              size: 19,
+                              size: 21,
                             ),
                           ],
                         ),

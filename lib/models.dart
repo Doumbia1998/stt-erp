@@ -526,7 +526,9 @@ class TypeFrais {
 // Prochain sous-compte d'un compte général : 65880000 -> 65880001, 41100000 -> 41100002…
 // Les sous-comptes occupent au plus les 4 derniers chiffres « à zéro » du compte général.
 String nextSubAccountCode(String general, Iterable<String> existingCodes) {
-  final codes = existingCodes.toSet();
+  general = general.trim();
+  final codes = existingCodes.map((c) => c.trim().toUpperCase()).toSet()
+    ..add(general);
   final trimmed = general.replaceFirst(RegExp(r'0+$'), '');
   final trailingZeros = general.length - trimmed.length;
   if (!RegExp(r'^\d+$').hasMatch(general) || trailingZeros == 0) {
@@ -548,7 +550,12 @@ String nextSubAccountCode(String general, Iterable<String> existingCodes) {
     if (value == null || value <= base || value >= base + span) continue;
     if (value > last) last = value;
   }
-  return (last + 1).toString().padLeft(general.length, '0');
+  // Le numéro proposé n'est jamais un code déjà présent dans le plan.
+  var next = last + 1;
+  while (codes.contains(next.toString().padLeft(general.length, '0'))) {
+    next++;
+  }
+  return next.toString().padLeft(general.length, '0');
 }
 
 // Compte « général » : numérique, au moins deux zéros finaux (41100000, 65880000…).

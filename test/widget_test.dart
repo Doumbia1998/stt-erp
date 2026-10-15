@@ -878,6 +878,7 @@ void main() {
         code: '41100000',
         libelle: 'Clients',
         nature: 'Client',
+        tiersId: 'ancien-client',
       ),
       PlanAccount(
         id: 'c-411-1',
