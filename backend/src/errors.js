@@ -38,6 +38,7 @@ const uniqueMessages = {
   journaux_pkey: 'Ce code journal existe déjà.',
   dossiers_num_dossier_key: 'Ce numéro de dossier existe déjà.',
   modes_reglement_intitule_unique: 'Ce mode de règlement existe déjà.',
+  types_frais_libelle_unique: 'Ce type de frais existe déjà.',
   factures_reference_key: 'Cette référence de facture existe déjà.',
 };
 

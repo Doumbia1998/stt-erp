@@ -28,6 +28,7 @@ class ErpData {
   final List<Voyage> voyages;
   final List<TransitDossier> dossiers;
   final List<ModeReglement> modesReglement;
+  final List<TypeFrais> typesFrais;
 
   const ErpData({
     required this.user,
@@ -39,6 +40,7 @@ class ErpData {
     required this.voyages,
     required this.dossiers,
     this.modesReglement = const [],
+    this.typesFrais = const [],
   });
 }
 
@@ -118,6 +120,9 @@ abstract class ErpBackend {
   Future<void> saveVoyage(Voyage voyage);
   Future<void> saveModeReglement(ModeReglement mode);
   Future<void> deleteModeReglement(ModeReglement mode);
+  // Enregistre le type de frais ; renvoie le sous-compte créé (ou null).
+  Future<PlanAccount?> saveTypeFrais(TypeFrais type);
+  Future<void> deleteTypeFrais(TypeFrais type);
 
   // Comptabilité générée depuis la gestion.
   Future<MiseAJourResultat> miseAJourComptable({
@@ -211,6 +216,10 @@ class HttpErpBackend implements ErpBackend {
           .cast<Map<String, dynamic>>()
           .map(modeReglementFromJson)
           .toList(),
+      typesFrais: ((json['typesFrais'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(typeFraisFromJson)
+          .toList(),
       dossiers: [
         for (final dossier in rows('dossiers'))
           dossierFromJson(
@@ -286,6 +295,28 @@ class HttpErpBackend implements ErpBackend {
   @override
   Future<void> deleteModeReglement(ModeReglement mode) =>
       _send('DELETE', '/modes-reglement/${_segment(mode.id)}');
+
+  @override
+  Future<PlanAccount?> saveTypeFrais(TypeFrais type) async {
+    final json =
+        await _send(
+              'PUT',
+              '/types-frais/${_segment(type.id)}',
+              typeFraisToJson(type),
+            )
+            as Map<String, dynamic>;
+    final saved = typeFraisFromJson(json['type'] as Map<String, dynamic>);
+    type
+      ..numero = saved.numero
+      ..libelle = saved.libelle
+      ..compte = saved.compte;
+    final created = json['compteCree'] as Map<String, dynamic>?;
+    return created == null ? null : planAccountFromJson(created);
+  }
+
+  @override
+  Future<void> deleteTypeFrais(TypeFrais type) =>
+      _send('DELETE', '/types-frais/${_segment(type.id)}');
 
   @override
   Future<MiseAJourResultat> miseAJourComptable({
@@ -390,6 +421,7 @@ class MemoryErpBackend implements ErpBackend {
   final List<Voyage> voyages = [];
   final List<TransitDossier> dossiers = [];
   final List<ModeReglement> modesReglement = [];
+  final List<TypeFrais> typesFrais = [];
   final Map<String, String> _passwords = {};
 
   MemoryErpBackend({String adminPassword = '1234'})
@@ -452,6 +484,7 @@ class MemoryErpBackend implements ErpBackend {
       voyages: [...voyages],
       dossiers: [...dossiers],
       modesReglement: [...modesReglement],
+      typesFrais: [...typesFrais],
     );
   }
 
@@ -504,6 +537,35 @@ class MemoryErpBackend implements ErpBackend {
   @override
   Future<void> deleteModeReglement(ModeReglement mode) async =>
       modesReglement.removeWhere((m) => m.id == mode.id);
+
+  @override
+  Future<PlanAccount?> saveTypeFrais(TypeFrais type) async {
+    type.libelle = type.libelle.toUpperCase();
+    PlanAccount? created;
+    final previous = typesFrais.where((t) => t.id == type.id).firstOrNull;
+    if (type.compteGeneral.isEmpty) {
+      type.compte = '';
+    } else if (previous?.compteGeneral != type.compteGeneral ||
+        type.compte.isEmpty) {
+      type.compte = nextSubAccountCode(type.compteGeneral, [
+        ...comptes.map((c) => c.code),
+      ]);
+      created = PlanAccount(
+        id: newLocalId('compte'),
+        code: type.compte,
+        libelle: type.libelle,
+        nature: 'Charge',
+      );
+      comptes.add(created);
+    }
+    if (type.numero == 0) type.numero = typesFrais.length + 1;
+    _upsert(typesFrais, type, (t) => t.id == type.id);
+    return created;
+  }
+
+  @override
+  Future<void> deleteTypeFrais(TypeFrais type) async =>
+      typesFrais.removeWhere((t) => t.id == type.id);
 
   // La version en mémoire n'a pas de comptabilité : rien à déverser.
   @override

@@ -23,6 +23,7 @@ part 'pages/comptabilite_pages.dart';
 part 'pages/dossier_dialogs.dart';
 part 'pages/dossiers_page.dart';
 part 'pages/facture_transitaire_page.dart';
+part 'pages/frais_caisse_pages.dart';
 part 'widgets/erp_documents.dart';
 part 'widgets/erp_grid.dart';
 part 'widgets/tiers_accounts.dart';
@@ -116,6 +117,7 @@ final List<PlanAccount> _planAccounts = [];
 final List<JournalCode> _journalCodes = [];
 final List<Voyage> _voyages = [];
 final List<ModeReglement> _modesReglement = [];
+final List<TypeFrais> _typesFrais = [];
 
 void _loadErpData(ErpData data) {
   _currentUser = data.user;
@@ -143,6 +145,9 @@ void _loadErpData(ErpData data) {
   _modesReglement
     ..clear()
     ..addAll(data.modesReglement);
+  _typesFrais
+    ..clear()
+    ..addAll(data.typesFrais);
 }
 
 class TransitTrackerApp extends StatelessWidget {
@@ -809,6 +814,8 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           comptes: _planAccounts,
           modes: _modesReglement,
         );
+      case 'Dépenses & Frais':
+        return TypesFraisPage(types: _typesFrais, comptes: _planAccounts);
       case 'Balance Agées':
         return BalanceAgeePage(clients: _clients, dossiers: _dossiers);
       case 'Saisie des Journaux':
@@ -1736,340 +1743,6 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
       ),
     ],
   );
-}
-
-class CashControlPage extends StatefulWidget {
-  final List<TransitDossier> dossiers;
-  final List<JournalCode> journals;
-
-  const CashControlPage({
-    super.key,
-    required this.dossiers,
-    required this.journals,
-  });
-
-  @override
-  State<CashControlPage> createState() => _CashControlPageState();
-}
-
-class _CashControlPageState extends State<CashControlPage> {
-  JournalCode? _journal;
-  DateTime _start = DateTime(DateTime.now().year, 1, 1);
-  DateTime _end = DateTime(DateTime.now().year, 12, 31);
-
-  List<(TransitDossier, DossierOperation)> get _movements {
-    final result = <(TransitDossier, DossierOperation)>[];
-    for (final dossier in widget.dossiers) {
-      for (final operation in dossier.operations) {
-        if (!_isCashMovement(operation)) continue;
-        final date = _parseOperationDate(operation.date);
-        if (date == null ||
-            date.isBefore(DateTime(_start.year, _start.month, _start.day)) ||
-            date.isAfter(
-              DateTime(_end.year, _end.month, _end.day, 23, 59, 59),
-            )) {
-          continue;
-        }
-        if (_journal != null && operation.codeJournal != _journal!.code) {
-          continue;
-        }
-        result.add((dossier, operation));
-      }
-    }
-    result.sort((left, right) {
-      final leftDate = _parseOperationDate(left.$2.date)!;
-      final rightDate = _parseOperationDate(right.$2.date)!;
-      return leftDate.compareTo(rightDate);
-    });
-    return result;
-  }
-
-  bool _isCashMovement(DossierOperation operation) =>
-      operation.type == DossierOperationType.clientPayment ||
-      operation.type == DossierOperationType.providerAdvance ||
-      operation.type == DossierOperationType.providerPayment ||
-      operation.type == DossierOperationType.expense;
-
-  DateTime? _parseOperationDate(String value) {
-    final match = RegExp(
-      r'^(\d{2})/(\d{2})/(\d{4})(?:\s+(\d{2}):(\d{2}))?$',
-    ).firstMatch(value);
-    if (match == null) return null;
-    final day = int.tryParse(match.group(1)!);
-    final month = int.tryParse(match.group(2)!);
-    final year = int.tryParse(match.group(3)!);
-    final hour = int.tryParse(match.group(4) ?? '0');
-    final minute = int.tryParse(match.group(5) ?? '0');
-    if (day == null ||
-        month == null ||
-        year == null ||
-        hour == null ||
-        minute == null) {
-      return null;
-    }
-    final date = DateTime(year, month, day, hour, minute);
-    if (date.year != year || date.month != month || date.day != day) {
-      return null;
-    }
-    return date;
-  }
-
-  double _signedAmount(DossierOperation operation) =>
-      operation.type == DossierOperationType.clientPayment ||
-          operation.type == DossierOperationType.providerAdvance
-      ? operation.montant
-      : -operation.montant;
-
-  @override
-  Widget build(BuildContext context) {
-    final movements = _movements;
-    final income = movements
-        .where((entry) => _signedAmount(entry.$2) > 0)
-        .fold<double>(0, (total, entry) => total + entry.$2.montant);
-    final outflow = movements
-        .where((entry) => _signedAmount(entry.$2) < 0)
-        .fold<double>(0, (total, entry) => total + entry.$2.montant);
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FD),
-      appBar: AppBar(
-        title: const Text('Contrôle de Caisse'),
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF1A237E),
-      ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1000),
-          child: ListView(
-            padding: const EdgeInsets.all(20),
-            children: [
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    children: [
-                      const Icon(
-                        Icons.account_balance_wallet_rounded,
-                        color: Colors.green,
-                        size: 54,
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Rapport de Contrôle de Caisse',
-                        style: Theme.of(context).textTheme.headlineSmall
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
-                        'Récapitulatif des encaissements et dépenses avec solde progressif.',
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 24),
-                      DropdownButtonFormField<JournalCode?>(
-                        isExpanded: true,
-                        key: const ValueKey('cash-journal-filter'),
-                        initialValue: _journal,
-                        decoration: const InputDecoration(
-                          labelText: 'Code journal',
-                          prefixIcon: Icon(Icons.menu_book_rounded),
-                          border: OutlineInputBorder(),
-                        ),
-                        items: [
-                          const DropdownMenuItem<JournalCode?>(
-                            value: null,
-                            child: Text('Tous les journaux'),
-                          ),
-                          ...widget.journals.map(
-                            (journal) => DropdownMenuItem<JournalCode?>(
-                              value: journal,
-                              child: Text(
-                                '${journal.code} • ${journal.intitule}',
-                              ),
-                            ),
-                          ),
-                        ],
-                        onChanged: (journal) =>
-                            setState(() => _journal = journal),
-                      ),
-                      const SizedBox(height: 16),
-                      Wrap(
-                        spacing: 14,
-                        runSpacing: 10,
-                        children: [
-                          _dateButton('Date début', _start, (date) {
-                            if (date != null) setState(() => _start = date);
-                          }),
-                          _dateButton('Date fin', _end, (date) {
-                            if (date != null) setState(() => _end = date);
-                          }),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          key: const ValueKey('generate-cash-control'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF2E7D32),
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                          ),
-                          onPressed: _generateReport,
-                          icon: const Icon(Icons.picture_as_pdf_outlined),
-                          label: const Text('GÉNÉRER LE CONTRÔLE DE CAISSE'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  _cashMetric('Encaissements', income, Colors.green),
-                  _cashMetric('Décaissements', outflow, Colors.redAccent),
-                  _cashMetric('Solde période', income - outflow, Colors.indigo),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (movements.isEmpty)
-                const Card(
-                  child: Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Text(
-                      'Aucun mouvement de caisse pour cette période et ce journal.',
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                )
-              else
-                ...movements.map(
-                  (entry) => Card(
-                    child: ListTile(
-                      leading: Icon(
-                        _signedAmount(entry.$2) >= 0
-                            ? Icons.south_west_rounded
-                            : Icons.north_east_rounded,
-                        color: _signedAmount(entry.$2) >= 0
-                            ? Colors.green
-                            : Colors.redAccent,
-                      ),
-                      title: Text(entry.$2.titre),
-                      subtitle: Text(
-                        '${entry.$1.numDossier} • ${entry.$1.client.nom} • ${entry.$2.date} • ${entry.$2.codeJournal.isEmpty ? 'Sans journal' : entry.$2.codeJournal}',
-                      ),
-                      trailing: Text(
-                        '${_signedAmount(entry.$2) < 0 ? '-' : '+'}${formatCurrency(entry.$2.montant)} FCFA',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _dateButton(
-    String label,
-    DateTime current,
-    ValueChanged<DateTime?> onPicked,
-  ) => OutlinedButton.icon(
-    onPressed: () async {
-      final picked = await showDatePicker(
-        context: context,
-        initialDate: current,
-        firstDate: DateTime(2000),
-        lastDate: DateTime(2100),
-      );
-      onPicked(picked);
-    },
-    icon: const Icon(Icons.calendar_month_outlined),
-    label: Text('$label : ${DateFormat('dd/MM/yyyy').format(current)}'),
-  );
-
-  Widget _cashMetric(String label, double amount, Color color) => SizedBox(
-    width: 260,
-    child: Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: TextStyle(color: color)),
-            const SizedBox(height: 6),
-            Text(
-              '${formatCurrency(amount)} FCFA',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-
-  Future<void> _generateReport() async {
-    if (_end.isBefore(_start)) {
-      await _showInfoAlert(
-        context,
-        title: 'Période invalide',
-        message:
-            'La date de fin doit être égale ou postérieure à la date de début.',
-      );
-      return;
-    }
-    final movements = _movements;
-    var balance = 0.0;
-    final data = movements.map((entry) {
-      final amount = _signedAmount(entry.$2);
-      balance += amount;
-      return [
-        entry.$2.date,
-        entry.$2.codeJournal.isEmpty ? '—' : entry.$2.codeJournal,
-        entry.$1.numDossier,
-        entry.$2.titre,
-        amount >= 0
-            ? formatCurrency(amount)
-            : '-${formatCurrency(amount.abs())}',
-        formatCurrency(balance),
-      ];
-    }).toList();
-    final pdf = pw.Document();
-    pdf.addPage(
-      pw.MultiPage(
-        build: (_) => [
-          pw.Text(
-            'RAPPORT DE CONTRÔLE DE CAISSE',
-            style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
-          ),
-          pw.SizedBox(height: 8),
-          pw.Text(
-            'Journal : ${_journal == null ? 'Tous les journaux' : '${_journal!.code} — ${_journal!.intitule}'}',
-          ),
-          pw.Text(
-            'Période : ${DateFormat('dd/MM/yyyy').format(_start)} au ${DateFormat('dd/MM/yyyy').format(_end)}',
-          ),
-          pw.SizedBox(height: 16),
-          pw.TableHelper.fromTextArray(
-            headers: [
-              'Date',
-              'Journal',
-              'Dossier',
-              'Opération',
-              'Entrée / sortie',
-              'Solde progressif',
-            ],
-            data: data,
-          ),
-          pw.SizedBox(height: 14),
-          pw.Text('Solde de la période : ${formatCurrency(balance)} FCFA'),
-        ],
-      ),
-    );
-    await Printing.layoutPdf(onLayout: (_) async => pdf.save());
-  }
 }
 
 class SettlementHubPage extends StatelessWidget {
@@ -3765,6 +3438,22 @@ class _PlanAccountFormDialogState extends State<_PlanAccountFormDialog> {
   final _code = TextEditingController();
   final _label = TextEditingController();
   late String _nature;
+  PlanAccount? _general;
+
+  // Comptes généraux auxquels rattacher un nouveau sous-compte.
+  List<PlanAccount> get _generals =>
+      widget.accounts.where((a) => isGeneralAccountCode(a.code)).toList()
+        ..sort((a, b) => a.code.compareTo(b.code));
+
+  void _attachTo(PlanAccount? general) => setState(() {
+    _general = general;
+    if (general == null) return;
+    _code.text = nextSubAccountCode(
+      general.code,
+      widget.accounts.map((a) => a.code),
+    );
+    if (_accountNatures.contains(general.nature)) _nature = general.nature;
+  });
 
   @override
   void initState() {
@@ -3799,6 +3488,35 @@ class _PlanAccountFormDialogState extends State<_PlanAccountFormDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (widget.initial == null && _generals.isNotEmpty) ...[
+                DropdownButtonFormField<PlanAccount?>(
+                  key: const ValueKey('plan-account-general'),
+                  isExpanded: true,
+                  initialValue: _general,
+                  decoration: const InputDecoration(
+                    labelText: 'Rattacher au compte général (facultatif)',
+                    helperText:
+                        'Le numéro du sous-compte suivant est proposé automatiquement',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem<PlanAccount?>(
+                      value: null,
+                      child: Text('Aucun (saisie libre)'),
+                    ),
+                    for (final general in _generals)
+                      DropdownMenuItem<PlanAccount?>(
+                        value: general,
+                        child: Text(
+                          '${general.code} — ${general.libelle}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                  onChanged: _attachTo,
+                ),
+                const SizedBox(height: 12),
+              ],
               TextFormField(
                 key: const ValueKey('plan-account-code'),
                 controller: _code,
@@ -3826,25 +3544,30 @@ class _PlanAccountFormDialogState extends State<_PlanAccountFormDialog> {
                     : null,
               ),
               const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                isExpanded: true,
+              KeyedSubtree(
                 key: const ValueKey('plan-account-nature'),
-                initialValue: _nature,
-                onChanged: widget.initial?.tiersId != null
-                    ? null
-                    : (value) {
-                        if (value != null) setState(() => _nature = value);
-                      },
-                decoration: const InputDecoration(
-                  labelText: 'Nature',
-                  border: OutlineInputBorder(),
+                child: DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  key: ValueKey('plan-account-nature-$_nature'),
+                  initialValue: _nature,
+                  onChanged: widget.initial?.tiersId != null
+                      ? null
+                      : (value) {
+                          if (value != null) setState(() => _nature = value);
+                        },
+                  decoration: const InputDecoration(
+                    labelText: 'Nature',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: _accountNatures
+                      .map(
+                        (nature) => DropdownMenuItem(
+                          value: nature,
+                          child: Text(nature),
+                        ),
+                      )
+                      .toList(),
                 ),
-                items: _accountNatures
-                    .map(
-                      (nature) =>
-                          DropdownMenuItem(value: nature, child: Text(nature)),
-                    )
-                    .toList(),
               ),
             ],
           ),
@@ -7050,6 +6773,17 @@ class _DossierOperationDialogState extends State<_DossierOperationDialog> {
     'Autre',
   ];
 
+  // Les types de frais paramétrés (avec leur sous-compte) remplacent la liste par défaut.
+  List<String> get _categories => _typesFrais.isEmpty
+      ? _expenseCategories
+      : _typesFrais.map((t) => t.libelle).toList();
+
+  @override
+  void initState() {
+    super.initState();
+    _expenseCategory = _categories.first;
+  }
+
   @override
   void dispose() {
     _titleController.dispose();
@@ -7104,7 +6838,8 @@ class _DossierOperationDialogState extends State<_DossierOperationDialog> {
                       labelText: 'Catégorie du frais',
                       border: OutlineInputBorder(),
                     ),
-                    items: _expenseCategories
+                    isExpanded: true,
+                    items: _categories
                         .map(
                           (category) => DropdownMenuItem(
                             value: category,
@@ -7113,9 +6848,24 @@ class _DossierOperationDialogState extends State<_DossierOperationDialog> {
                         )
                         .toList(),
                     onChanged: (value) {
-                      if (value != null) {
-                        setState(() => _expenseCategory = value);
-                      }
+                      if (value == null) return;
+                      final type = _typesFrais
+                          .where((t) => t.libelle == value)
+                          .firstOrNull;
+                      setState(() {
+                        _expenseCategory = value;
+                        // Montant par défaut du type de frais.
+                        if (type != null &&
+                            type.montant > 0 &&
+                            _amountController.text.trim().isEmpty) {
+                          _amountController.text = type.montant.toStringAsFixed(
+                            0,
+                          );
+                        }
+                        if (_titleController.text.trim().isEmpty) {
+                          _titleController.text = value;
+                        }
+                      });
                     },
                   ),
                 ],

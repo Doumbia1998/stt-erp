@@ -503,3 +503,54 @@ class ModeReglement {
 
   bool get estCheque => type == 'Chèque';
 }
+
+// Type de frais (AMENDE, DROIT DE DOUANE…) et son sous-compte comptable.
+class TypeFrais {
+  final String id;
+  int numero;
+  String libelle;
+  double montant;
+  String compteGeneral;
+  String compte;
+
+  TypeFrais({
+    required this.id,
+    this.numero = 0,
+    required this.libelle,
+    this.montant = 0,
+    this.compteGeneral = '',
+    this.compte = '',
+  });
+}
+
+// Prochain sous-compte d'un compte général : 65880000 -> 65880001, 41100000 -> 41100002…
+// Les sous-comptes occupent au plus les 4 derniers chiffres « à zéro » du compte général.
+String nextSubAccountCode(String general, Iterable<String> existingCodes) {
+  final codes = existingCodes.toSet();
+  final trimmed = general.replaceFirst(RegExp(r'0+$'), '');
+  final trailingZeros = general.length - trimmed.length;
+  if (!RegExp(r'^\d+$').hasMatch(general) || trailingZeros == 0) {
+    for (var n = 1; n < 1000; n++) {
+      final candidate = '$general${n.toString().padLeft(3, '0')}';
+      if (!codes.contains(candidate)) return candidate;
+    }
+    return '${general}999';
+  }
+  final base = int.parse(general);
+  var span = 1;
+  for (var i = 0; i < (trailingZeros < 4 ? trailingZeros : 4); i++) {
+    span *= 10;
+  }
+  var last = base;
+  for (final code in codes) {
+    if (code.length != general.length) continue;
+    final value = int.tryParse(code);
+    if (value == null || value <= base || value >= base + span) continue;
+    if (value > last) last = value;
+  }
+  return (last + 1).toString().padLeft(general.length, '0');
+}
+
+// Compte « général » : numérique, au moins deux zéros finaux (41100000, 65880000…).
+bool isGeneralAccountCode(String code) =>
+    RegExp(r'^\d{4,}$').hasMatch(code) && code.endsWith('00');

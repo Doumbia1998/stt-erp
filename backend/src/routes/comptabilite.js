@@ -222,6 +222,10 @@ async function buildEntries(client, du, au, categories) {
 
   // Frais et dépenses des dossiers.
   if (wanted.has('depenses')) {
+    const { rows: types } = await client.query(
+      'SELECT lower(libelle) AS libelle, compte FROM types_frais WHERE compte IS NOT NULL',
+    );
+    const chargeOf = new Map(types.map((t) => [t.libelle, t.compte]));
     const { rows: expenses } = await client.query(
       `SELECT dossier_id, position, titre, categorie, montant, date::date AS jour
        FROM dossier_depenses WHERE date::date BETWEEN $1 AND $2 AND montant > 0`,
@@ -238,7 +242,12 @@ async function buildEntries(client, du, au, categories) {
         libelle: `${e.titre}${e.categorie ? ` (${e.categorie})` : ''}`,
         source: `depense:${e.dossier_id}:${e.position}`,
         lines: [
-          { compte: COMPTES.charges, libelle: e.titre, debit: amount, credit: 0 },
+          {
+            compte: chargeOf.get((e.categorie || '').toLowerCase()) ?? COMPTES.charges,
+            libelle: e.titre,
+            debit: amount,
+            credit: 0,
+          },
           { compte: treasuryOf(JOURNAUX.depenses.code), libelle: e.titre, debit: 0, credit: amount },
         ],
       });

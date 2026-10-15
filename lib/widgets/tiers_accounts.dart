@@ -38,7 +38,19 @@ List<PlanAccount> _accountsForTiers(
         .toList()
       ..sort((a, b) => a.code.compareTo(b.code));
 
-// Création rapide d'un compte de tiers depuis la fiche client ou fournisseur.
+// Comptes généraux d'une classe (41100000 Clients, 40100000 Fournisseurs…).
+List<PlanAccount> _generalAccounts(
+  List<PlanAccount> comptes,
+  String classPrefix,
+) =>
+    comptes
+        .where(
+          (a) => a.code.startsWith(classPrefix) && isGeneralAccountCode(a.code),
+        )
+        .toList()
+      ..sort((a, b) => a.code.compareTo(b.code));
+
+// Création rapide d'un compte de tiers : sous-compte du compte général choisi.
 Future<PlanAccount?> _quickCreateAccount(
   BuildContext context, {
   required List<PlanAccount> comptes,
@@ -46,43 +58,140 @@ Future<PlanAccount?> _quickCreateAccount(
   required String prefix,
   required String suggestedName,
 }) async {
-  final name = suggestedName.trim();
-  final letters = name
-      .toUpperCase()
-      .replaceAll(RegExp(r'[^A-Z0-9]'), '')
-      .padRight(3, 'X');
-  final code = TextEditingController(
-    text: '$prefix${letters.substring(0, math.min(8, letters.length))}',
-  );
-  final label = TextEditingController(text: name.toUpperCase());
-  final formKey = GlobalKey<FormState>();
   final account = await showDialog<PlanAccount>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: Text('Nouveau compte $nature'),
-      content: SizedBox(
-        width: 420,
-        child: Form(
-          key: formKey,
+    builder: (context) => _QuickAccountDialog(
+      comptes: comptes,
+      nature: nature,
+      prefix: prefix,
+      suggestedName: suggestedName,
+    ),
+  );
+  if (account == null || !context.mounted) return null;
+  if (!await _persist(context, () => erpBackend.saveAccount(account))) {
+    return null;
+  }
+  comptes.add(account);
+  return account;
+}
+
+class _QuickAccountDialog extends StatefulWidget {
+  final List<PlanAccount> comptes;
+  final String nature;
+  final String prefix;
+  final String suggestedName;
+
+  const _QuickAccountDialog({
+    required this.comptes,
+    required this.nature,
+    required this.prefix,
+    required this.suggestedName,
+  });
+
+  @override
+  State<_QuickAccountDialog> createState() => _QuickAccountDialogState();
+}
+
+class _QuickAccountDialogState extends State<_QuickAccountDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _code = TextEditingController();
+  final _label = TextEditingController();
+  late final String _classPrefix = widget.prefix.substring(0, 2);
+  late final List<PlanAccount> _generals = _generalAccounts(
+    widget.comptes,
+    _classPrefix,
+  );
+  PlanAccount? _general;
+
+  @override
+  void initState() {
+    super.initState();
+    _general =
+        _generals.where((a) => a.nature == widget.nature).firstOrNull ??
+        _generals.firstOrNull;
+    _code.text = _suggestion();
+    _label.text = widget.suggestedName.trim().toUpperCase();
+  }
+
+  @override
+  void dispose() {
+    _code.dispose();
+    _label.dispose();
+    super.dispose();
+  }
+
+  String _suggestion() {
+    final general = _general;
+    if (general != null) {
+      return nextSubAccountCode(
+        general.code,
+        widget.comptes.map((a) => a.code),
+      );
+    }
+    final letters = widget.suggestedName
+        .toUpperCase()
+        .replaceAll(RegExp(r'[^A-Z0-9]'), '')
+        .padRight(3, 'X');
+    return '${widget.prefix}${letters.substring(0, math.min(8, letters.length))}';
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text('Nouveau compte ${widget.nature}'),
+    content: SizedBox(
+      width: 440,
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (_generals.isNotEmpty) ...[
+                DropdownButtonFormField<PlanAccount>(
+                  key: const ValueKey('quick-account-general'),
+                  isExpanded: true,
+                  initialValue: _general,
+                  decoration: _inputDecoration(
+                    'Compte général',
+                    icon: Icons.account_tree_outlined,
+                  ),
+                  items: [
+                    for (final g in _generals)
+                      DropdownMenuItem(
+                        value: g,
+                        child: Text(
+                          '${g.code} — ${g.libelle}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                  onChanged: (value) => setState(() {
+                    _general = value;
+                    _code.text = _suggestion();
+                  }),
+                ),
+                const SizedBox(height: 12),
+              ],
               TextFormField(
                 key: const ValueKey('quick-account-code'),
-                controller: code,
+                controller: _code,
                 textCapitalization: TextCapitalization.characters,
-                decoration: _inputDecoration(
-                  'Numéro de compte *',
-                  icon: Icons.tag_rounded,
-                  hint: '${prefix}CLIENT',
-                ),
+                decoration:
+                    _inputDecoration(
+                      'Numéro de compte *',
+                      icon: Icons.tag_rounded,
+                    ).copyWith(
+                      helperText: _general == null
+                          ? null
+                          : 'Sous-compte suivant de ${_general!.code}',
+                    ),
                 validator: (value) {
                   final text = value?.trim() ?? '';
                   if (text.isEmpty) return 'Champ obligatoire';
-                  if (!text.startsWith(prefix.substring(0, 2))) {
-                    return 'Un compte $nature commence par ${prefix.substring(0, 2)}';
+                  if (!text.startsWith(_classPrefix)) {
+                    return 'Un compte ${widget.nature} commence par $_classPrefix';
                   }
-                  final exists = comptes.any(
+                  final exists = widget.comptes.any(
                     (a) =>
                         _normalizeUniqueValue(a.code) ==
                         _normalizeUniqueValue(text),
@@ -93,10 +202,12 @@ Future<PlanAccount?> _quickCreateAccount(
               const SizedBox(height: 12),
               TextFormField(
                 key: const ValueKey('quick-account-label'),
-                controller: label,
+                controller: _label,
+                textCapitalization: TextCapitalization.characters,
                 decoration: _inputDecoration(
                   'Intitulé *',
                   icon: Icons.short_text_rounded,
+                  hint: 'Nom du ${widget.nature.toLowerCase()}',
                 ),
                 validator: (value) =>
                     (value ?? '').trim().isEmpty ? 'Champ obligatoire' : null,
@@ -105,36 +216,28 @@ Future<PlanAccount?> _quickCreateAccount(
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Annuler'),
-        ),
-        FilledButton(
-          key: const ValueKey('quick-account-save'),
-          onPressed: () {
-            if (!formKey.currentState!.validate()) return;
-            Navigator.pop(
-              context,
-              PlanAccount(
-                id: newLocalId('compte'),
-                code: code.text.trim().toUpperCase(),
-                libelle: label.text.trim(),
-                nature: nature,
-              ),
-            );
-          },
-          child: const Text('Créer le compte'),
-        ),
-      ],
     ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Annuler'),
+      ),
+      FilledButton(
+        key: const ValueKey('quick-account-save'),
+        onPressed: () {
+          if (!_formKey.currentState!.validate()) return;
+          Navigator.pop(
+            context,
+            PlanAccount(
+              id: newLocalId('compte'),
+              code: _code.text.trim().toUpperCase(),
+              libelle: _label.text.trim().toUpperCase(),
+              nature: widget.nature,
+            ),
+          );
+        },
+        child: const Text('Créer le compte'),
+      ),
+    ],
   );
-  code.dispose();
-  label.dispose();
-  if (account == null || !context.mounted) return null;
-  if (!await _persist(context, () => erpBackend.saveAccount(account))) {
-    return null;
-  }
-  comptes.add(account);
-  return account;
 }

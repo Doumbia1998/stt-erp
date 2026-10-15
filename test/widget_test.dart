@@ -864,6 +864,152 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('Sub-accounts follow the general account and fee types', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final backend = erpBackend as MemoryErpBackend;
+    backend.comptes.addAll([
+      PlanAccount(
+        id: 'g-411',
+        code: '41100000',
+        libelle: 'Clients',
+        nature: 'Client',
+      ),
+      PlanAccount(
+        id: 'c-411-1',
+        code: '41100001',
+        libelle: 'MAH KEITA',
+        nature: 'Client',
+        tiersId: 'autre-client',
+      ),
+      PlanAccount(
+        id: 'g-6588',
+        code: '65880000',
+        libelle: 'Autres charges diverses',
+        nature: 'Charge',
+      ),
+    ]);
+    final client = Client(id: 'client-c', nom: 'Client Caisse', telephone: '');
+    final dossier = TransitDossier(
+      id: 'dossier-c',
+      numDossier: 'STT-CAISSE',
+      numBL: '',
+      numLB: '',
+      client: client,
+      nbConteneurs: 0,
+      dateDebut: '09/10/2026',
+    );
+    dossier.operations.add(
+      DossierOperation(
+        type: DossierOperationType.clientPayment,
+        titre: 'Encaissement',
+        montant: 1500000,
+        date: '${DateFormat('dd/MM/yyyy').format(DateTime.now())} 10:00',
+        codeJournal: 'CA',
+        modePaiement: 'Espèces',
+      ),
+    );
+    backend
+      ..clients.add(client)
+      ..dossiers.add(dossier)
+      ..journaux.add(
+        JournalCode(
+          code: 'CA',
+          intitule: 'Caisse principale',
+          type: 'Caisse',
+          compteTresorerie: '57110001',
+        ),
+      );
+
+    await tester.pumpWidget(const TransitTrackerApp());
+    await tester.enterText(find.byType(TextField).at(0), 'admin');
+    await tester.enterText(find.byType(TextField).at(1), '1234');
+    await tester.tap(find.text('SE CONNECTER'));
+    await tester.pumpAndSettle();
+
+    Future<void> open(String module, String item) async {
+      await tester.ensureVisible(find.byTooltip(module));
+      await tester.tap(find.byTooltip(module));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(item).last);
+      await tester.pumpAndSettle();
+    }
+
+    // Fiche client : le compte proposé est le sous-compte suivant de 41100000.
+    await open('Transitaire', 'Clients');
+    await tester.tap(find.byIcon(Icons.person_add_alt_1_rounded));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).at(0), 'Nouveau Client');
+    final create = find.byKey(const ValueKey('client-account-create'));
+    await tester.ensureVisible(create);
+    await tester.tap(create);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextFormField>(
+            find.byKey(const ValueKey('quick-account-code')),
+          )
+          .controller!
+          .text,
+      '41100002',
+    );
+    expect(find.text('41100000 — Clients'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('quick-account-save')));
+    await tester.pumpAndSettle();
+    expect(backend.comptes.any((a) => a.code == '41100002'), isTrue);
+    expect(find.text('41100002 • NOUVEAU CLIENT'), findsOneWidget);
+    await tester.tap(find.text('Annuler').last);
+    await tester.pumpAndSettle();
+
+    // Type de frais : AMENDE devient le sous-compte 65880001.
+    await open('Comptabilité', 'Dépenses & Frais');
+    await tester.enterText(
+      find.byKey(const ValueKey('fee-type-label')),
+      'amende',
+    );
+    await tester.tap(find.byKey(const ValueKey('fee-type-general-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('65880000 — Autres charges diverses').last);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('fee-type-subaccount')))
+          .data,
+      'Sous-compte : 65880001 (créé automatiquement)',
+    );
+    await tester.tap(find.byKey(const ValueKey('fee-type-save')));
+    await tester.pumpAndSettle();
+    final feeGrid = find.byKey(const ValueKey('fee-types-grid'));
+    expect(
+      find.descendant(of: feeGrid, matching: find.text('AMENDE')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: feeGrid, matching: find.text('65880001')),
+      findsOneWidget,
+    );
+    expect(backend.typesFrais.single.compte, '65880001');
+
+    // Contrôle de caisse : compte général du journal et compte tiers.
+    await open('Comptabilité', 'Control des Caisses');
+    final cash = find.byKey(const ValueKey('cash-control-grid'));
+    expect(
+      find.descendant(of: cash, matching: find.text('57110001')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: cash,
+        matching: find.text('Règlement Client Caisse (Espèces)'),
+      ),
+      findsOneWidget,
+    );
+  });
+
   test('Dossier balances keep the client and provider accounts separate', () {
     final client = Client(id: 'client-1', nom: 'Client test', telephone: '');
     final provider = Prestataire(

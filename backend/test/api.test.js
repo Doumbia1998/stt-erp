@@ -515,3 +515,70 @@ test('the accounting update posts balanced entries without duplicates', async ()
   // Sans transitaire affecté, le règlement va au compte du prestataire du dossier.
   assert.ok(bank.body.some((l) => l.compte === '401001' && l.debit === 50000));
 });
+
+test('fee types create their sub-account under the general account', async () => {
+  assert.equal(
+    (await call('PUT', '/comptes/acc-6588', {
+      code: '65880000',
+      libelle: 'Autres charges diverses',
+      nature: 'Charge',
+    })).status,
+    200,
+  );
+  const amende = await call('PUT', '/types-frais/frais-1', {
+    libelle: 'amende',
+    montant: 0,
+    compteGeneral: '65880000',
+  });
+  assert.equal(amende.status, 200);
+  assert.equal(amende.body.type.libelle, 'AMENDE');
+  assert.equal(amende.body.type.compte, '65880001');
+  assert.equal(amende.body.compteCree.code, '65880001');
+  assert.equal(amende.body.compteCree.nature, 'Charge');
+
+  const douane = await call('PUT', '/types-frais/frais-2', {
+    libelle: 'Droit de douane',
+    montant: 25000,
+    compteGeneral: '65880000',
+  });
+  assert.equal(douane.body.type.compte, '65880002');
+
+  // Renommer sans changer de compte général garde le même sous-compte.
+  const renamed = await call('PUT', '/types-frais/frais-1', {
+    libelle: 'Amende police',
+    montant: 0,
+    compteGeneral: '65880000',
+  });
+  assert.equal(renamed.body.type.compte, '65880001');
+  assert.equal(renamed.body.compteCree, null);
+  assert.equal(
+    (await call('PUT', '/types-frais/frais-3', { libelle: 'amende police', montant: 0 })).status,
+    409,
+  );
+
+  const data = await call('GET', '/donnees');
+  assert.equal(data.body.typesFrais.length, 2);
+  assert.equal(
+    data.body.comptes.find((c) => c.code === '65880001').libelle,
+    'AMENDE POLICE',
+  );
+
+  // Une dépense de ce type est imputée sur son sous-compte.
+  const dossier = (await call('GET', '/donnees')).body.dossiers.find((d) => d.id === 'd5');
+  const saved = await call('PUT', '/dossiers/d5', {
+    ...dossier,
+    depenses: [
+      ...dossier.depenses,
+      { titre: 'Amende route', categorie: 'AMENDE POLICE', montant: 15000, date: '14/10/2026 08:00' },
+    ],
+  });
+  assert.equal(saved.status, 200);
+  await call('POST', '/comptabilite/mise-a-jour', {
+    du: '01/10/2026',
+    au: '31/10/2026',
+    categories: ['depenses'],
+  });
+  const cad = await call('GET', '/comptabilite/ecritures?journal=CAD&mois=2026-10');
+  assert.ok(cad.body.some((l) => l.compte === '65880001' && l.debit === 15000));
+  assert.ok(cad.body.some((l) => l.compte === '638000' && l.debit === 5000));
+});

@@ -1,4 +1,6 @@
+const crypto = require('node:crypto');
 const express = require('express');
+const { nextSubAccount } = require('../accounts');
 const { withTransaction } = require('../db');
 const { badRequest, conflict, notFound } = require('../errors');
 const {
@@ -78,6 +80,15 @@ const modeReglementJson = (r) => ({
   journalClient: r.journal_client ?? '',
   journalFournisseur: r.journal_fournisseur ?? '',
   compteTresorerie: r.compte_tresorerie ?? '',
+});
+
+const typeFraisJson = (r) => ({
+  id: r.id,
+  numero: Number(r.numero),
+  libelle: r.libelle,
+  montant: r.montant,
+  compteGeneral: r.compte_general ?? '',
+  compte: r.compte ?? '',
 });
 
 const voyageJson = (r) => ({
@@ -432,6 +443,74 @@ function referentielsRouter(pool) {
     }
   });
 
+  // Type de frais : un sous-compte est créé sous le compte général choisi.
+  router.put('/types-frais/:id', requireModule('Comptabilité', 'Transport'), async (req, res, next) => {
+    try {
+      const b = req.body;
+      const typeId = id(req);
+      const libelle = text(b, 'libelle', { required: true, max: 120 }).toUpperCase();
+      const montant = amount(b, 'montant', { min: 0 });
+      const general = optionalRef(b, 'compteGeneral');
+      const result = await withTransaction(pool, async (client) => {
+        const { rows: current } = await client.query(
+          'SELECT * FROM types_frais WHERE id = $1 FOR UPDATE',
+          [typeId],
+        );
+        const existing = current[0];
+        let compte = existing?.compte ?? null;
+        let created = null;
+        if (!general) {
+          compte = null;
+        } else if (existing?.compte_general !== general || !compte) {
+          const { rows: parent } = await client.query(
+            'SELECT nature FROM plan_comptable WHERE code = $1',
+            [general],
+          );
+          if (parent.length === 0) throw notFound('Compte général introuvable.');
+          // Verrou : deux créations simultanées n'obtiennent pas le même numéro.
+          await client.query('SELECT pg_advisory_xact_lock(424243)');
+          const { rows: codes } = await client.query('SELECT code FROM plan_comptable');
+          compte = nextSubAccount(general, codes.map((c) => c.code));
+          const { rows } = await client.query(
+            `INSERT INTO plan_comptable (id, code, libelle, nature)
+             VALUES ($1, $2, $3, $4) RETURNING *`,
+            [`compte-${crypto.randomUUID()}`, compte, libelle, parent[0].nature],
+          );
+          created = rows[0];
+        } else {
+          await client.query(
+            'UPDATE plan_comptable SET libelle = $2, modifie_le = now() WHERE code = $1',
+            [compte, libelle],
+          );
+        }
+        const { rows } = await client.query(
+          `INSERT INTO types_frais (id, libelle, montant, compte_general, compte)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (id) DO UPDATE SET
+             libelle = EXCLUDED.libelle, montant = EXCLUDED.montant,
+             compte_general = EXCLUDED.compte_general, compte = EXCLUDED.compte,
+             modifie_le = now()
+           RETURNING *`,
+          [typeId, libelle, montant, general, compte],
+        );
+        return { type: typeFraisJson(rows[0]), compteCree: created && compteJson(created) };
+      });
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.delete('/types-frais/:id', requireModule('Comptabilité', 'Transport'), async (req, res, next) => {
+    try {
+      const { rowCount } = await pool.query('DELETE FROM types_frais WHERE id = $1', [id(req)]);
+      if (rowCount === 0) throw notFound('Type de frais introuvable.');
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Chaque utilisateur peut changer sa propre photo.
   router.put('/moi/photo', async (req, res, next) => {
     try {
@@ -458,4 +537,5 @@ module.exports = {
   journalJson,
   voyageJson,
   modeReglementJson,
+  typeFraisJson,
 };

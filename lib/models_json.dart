@@ -387,3 +387,18 @@ Map<String, dynamic> modeReglementToJson(ModeReglement mode) => {
   'journalFournisseur': mode.journalFournisseur,
   'compteTresorerie': mode.compteTresorerie,
 };
+
+TypeFrais typeFraisFromJson(Map<String, dynamic> json) => TypeFrais(
+  id: json['id'] as String,
+  numero: (json['numero'] as num?)?.toInt() ?? 0,
+  libelle: _str(json['libelle']),
+  montant: _num(json['montant']),
+  compteGeneral: _str(json['compteGeneral']),
+  compte: _str(json['compte']),
+);
+
+Map<String, dynamic> typeFraisToJson(TypeFrais type) => {
+  'libelle': type.libelle,
+  'montant': type.montant,
+  'compteGeneral': type.compteGeneral,
+};
