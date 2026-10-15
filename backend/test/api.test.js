@@ -404,3 +404,114 @@ test('repeated failures lock the login temporarily', async () => {
   });
   assert.equal(locked.status, 429);
 });
+
+test('payment modes are linked to journals', async () => {
+  const saved = await call('PUT', '/modes-reglement/mode-1', {
+    intitule: 'VIREMENT BIM',
+    type: 'Virement bancaire',
+    journalClient: 'BQ',
+    journalFournisseur: 'BQ',
+    compteTresorerie: '521001',
+  });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.journalFournisseur, 'BQ');
+  const duplicate = await call('PUT', '/modes-reglement/mode-2', {
+    intitule: 'virement bim',
+    type: 'Virement bancaire',
+  });
+  assert.equal(duplicate.status, 409);
+  const data = await call('GET', '/donnees');
+  assert.equal(data.body.modesReglement[0].intitule, 'VIREMENT BIM');
+  assert.equal((await call('DELETE', '/modes-reglement/mode-1')).status, 204);
+});
+
+test('the accounting update posts balanced entries without duplicates', async () => {
+  const factures = Object.fromEntries(
+    Object.entries(dossierBody().factures).map(([kind, f]) => [
+      kind,
+      { ...f, id: `d5-${kind}`, reference: `${f.reference}-d5` },
+    ]),
+  );
+  factures.client = {
+    ...factures.client,
+    reference: 'FAC-STT-1026-0005',
+    statut: 'Clôturée',
+    montant: 120000,
+    dateEmission: '12/10/2026',
+    lignes: [{ description: 'Conteneur', quantite: 1, prixUnitaire: 120000 }],
+  };
+  factures.forwarder = {
+    ...factures.forwarder,
+    reference: 'FAC-TRS-1026-0005',
+    statut: 'Clôturée',
+    montant: 50000,
+    dateEmission: '12/10/2026',
+    lignes: [{ description: 'Transit', quantite: 1, prixUnitaire: 50000, fraisTransit: 50000 }],
+  };
+  const created = await call(
+    'PUT',
+    '/dossiers/d5',
+    dossierBody({
+      numDossier: 'STT-5',
+      factures,
+      operations: [
+        {
+          id: 'op-d5-1',
+          type: 'clientPayment',
+          titre: 'Règlement client',
+          montant: 70000,
+          date: '13/10/2026 09:00',
+          codeJournal: 'BQ',
+        },
+        {
+          id: 'op-d5-2',
+          type: 'providerPayment',
+          titre: 'Règlement transitaire',
+          categorie: 'Règlement Transitaire',
+          montant: 50000,
+          date: '13/10/2026 10:00',
+          codeJournal: 'BQ',
+        },
+      ],
+      depenses: [
+        { titre: 'Péage', categorie: 'Route', montant: 5000, date: '13/10/2026 11:00' },
+      ],
+    }),
+  );
+  assert.equal(created.status, 200);
+
+  const body = {
+    du: '01/10/2026',
+    au: '31/10/2026',
+    categories: ['ventes', 'achats', 'reglements', 'depenses', 'transit', 'paie', 'avances'],
+  };
+  const first = await call('POST', '/comptabilite/mise-a-jour', body);
+  assert.equal(first.status, 200);
+  assert.equal(first.body.categories.ventes.montant >= 120000, true);
+  assert.equal(first.body.categories.reglements.ecritures, 2);
+  assert.equal(first.body.categories.depenses.montant, 5000);
+  assert.equal(first.body.categories.transit.montant, 50000);
+  assert.ok(first.body.ignores.some((m) => m.includes('Paie')));
+
+  const again = await call('POST', '/comptabilite/mise-a-jour', body);
+  assert.equal(again.body.ecritures, first.body.ecritures);
+
+  const journals = await call('GET', '/comptabilite/journaux?annee=2026');
+  const ven = journals.body.periodes.find((p) => p.journal === 'VEN' && p.mois === '2026-10');
+  assert.ok(ven);
+  assert.equal(ven.debit, ven.credit);
+  for (const periode of journals.body.periodes) assert.equal(periode.debit, periode.credit);
+  assert.equal(journals.body.derniereMiseAJour.au, '31/10/2026');
+
+  const sales = await call('GET', '/comptabilite/ecritures?journal=VEN&mois=2026-10');
+  const invoiceLines = sales.body.filter((l) => l.piece === 'FAC-STT-1026-0005');
+  assert.deepEqual(
+    invoiceLines.map((l) => [l.compte, l.debit, l.credit]),
+    [['411002', 120000, 0], ['706000', 0, 120000]],
+  );
+  const bank = await call('GET', '/comptabilite/ecritures?journal=BQ&mois=2026-10');
+  // Encaissement client : débit du compte de trésorerie du journal BQ (521001).
+  assert.ok(bank.body.some((l) => l.compte === '521001' && l.debit === 70000));
+  // Sans transitaire affecté, le règlement va au compte du prestataire du dossier.
+  assert.ok(bank.body.some((l) => l.compte === '401001' && l.debit === 50000));
+});

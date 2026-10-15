@@ -802,14 +802,38 @@ class _DossiersPageState extends State<DossiersPage> {
       );
       return;
     }
-    if (dossier.estFacture &&
-        dossier.reglementsDe(DossierInvoiceKind.client).isNotEmpty) {
-      await _showInfoAlert(
-        context,
-        title: 'Facture déjà réglée',
-        message:
-            'La facture ${dossier.factureClient.reference} a déjà des règlements : elle ne peut plus être modifiée. Utilisez « Impr. facture » pour l’imprimer.',
+    if (dossier.estFacture) {
+      final invoice = dossier.factureClient;
+      final print = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          icon: const Icon(
+            Icons.verified_rounded,
+            color: Color(0xFF15803D),
+            size: 36,
+          ),
+          title: const Text('Dossier déjà facturé'),
+          content: Text(
+            'Ce dossier a déjà été facturé : facture ${invoice.reference} du '
+            '${invoice.dateEmission} pour ${_amountText(invoice.montant)}.\n\n'
+            'Une facture validée ne peut plus être refaite.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Fermer'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(context, true),
+              icon: const Icon(Icons.print_outlined),
+              label: const Text('Imprimer la facture'),
+            ),
+          ],
+        ),
       );
+      if (print == true && mounted) {
+        await _printClientInvoice(dossier, _format);
+      }
       return;
     }
     final saved = await showDialog<bool>(

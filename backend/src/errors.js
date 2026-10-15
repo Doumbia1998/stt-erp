@@ -37,6 +37,7 @@ const uniqueMessages = {
   plan_comptable_code_key: 'Ce code de compte comptable existe déjà.',
   journaux_pkey: 'Ce code journal existe déjà.',
   dossiers_num_dossier_key: 'Ce numéro de dossier existe déjà.',
+  modes_reglement_intitule_unique: 'Ce mode de règlement existe déjà.',
   factures_reference_key: 'Cette référence de facture existe déjà.',
 };
 

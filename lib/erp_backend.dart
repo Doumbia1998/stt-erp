@@ -27,6 +27,7 @@ class ErpData {
   final List<JournalCode> journaux;
   final List<Voyage> voyages;
   final List<TransitDossier> dossiers;
+  final List<ModeReglement> modesReglement;
 
   const ErpData({
     required this.user,
@@ -37,7 +38,65 @@ class ErpData {
     required this.journaux,
     required this.voyages,
     required this.dossiers,
+    this.modesReglement = const [],
   });
+}
+
+// Synthèse d'un journal comptable pour un mois.
+class JournalPeriode {
+  final String journal;
+  // « AAAA-MM »
+  final String mois;
+  final int ecritures;
+  final double debit;
+  final double credit;
+
+  const JournalPeriode({
+    required this.journal,
+    required this.mois,
+    required this.ecritures,
+    required this.debit,
+    required this.credit,
+  });
+}
+
+class JournauxSynthese {
+  final List<JournalPeriode> periodes;
+  final String derniereMiseAJour;
+
+  const JournauxSynthese(this.periodes, this.derniereMiseAJour);
+}
+
+// Ligne d'écriture comptable.
+class EcritureLigne {
+  final int ecriture;
+  final String date;
+  final String piece;
+  final String libelle;
+  final String compte;
+  final String libelleLigne;
+  final double debit;
+  final double credit;
+
+  const EcritureLigne({
+    required this.ecriture,
+    required this.date,
+    required this.piece,
+    required this.libelle,
+    required this.compte,
+    required this.libelleLigne,
+    required this.debit,
+    required this.credit,
+  });
+}
+
+// Résultat d'une mise à jour comptable : nombre d'écritures et montant par catégorie.
+class MiseAJourResultat {
+  final int ecritures;
+  final Map<String, (int, double)> categories;
+  final List<String> ignores;
+
+  const MiseAJourResultat(this.ecritures, this.categories, this.ignores);
 }
 
 abstract class ErpBackend {
@@ -57,6 +116,17 @@ abstract class ErpBackend {
   // [previousCode] : code actuel du journal s'il est renommé.
   Future<void> saveJournal(JournalCode journal, {String? previousCode});
   Future<void> saveVoyage(Voyage voyage);
+  Future<void> saveModeReglement(ModeReglement mode);
+  Future<void> deleteModeReglement(ModeReglement mode);
+
+  // Comptabilité générée depuis la gestion.
+  Future<MiseAJourResultat> miseAJourComptable({
+    required String du,
+    required String au,
+    required List<String> categories,
+  });
+  Future<JournauxSynthese> journauxComptables(int annee);
+  Future<List<EcritureLigne>> ecritures(String journal, String mois);
   // Met à jour la version, l'ID et la saisie du dossier après l'enregistrement.
   Future<void> saveDossier(TransitDossier dossier);
   Future<void> deleteDossier(TransitDossier dossier);
@@ -137,6 +207,10 @@ class HttpErpBackend implements ErpBackend {
       comptes: rows('comptes').map(planAccountFromJson).toList(),
       journaux: rows('journaux').map(journalFromJson).toList(),
       voyages: rows('voyages').map(voyageFromJson).toList(),
+      modesReglement: ((json['modesReglement'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(modeReglementFromJson)
+          .toList(),
       dossiers: [
         for (final dossier in rows('dossiers'))
           dossierFromJson(
@@ -203,6 +277,91 @@ class HttpErpBackend implements ErpBackend {
       _send('PUT', '/voyages/${_segment(voyage.id)}', voyageToJson(voyage));
 
   @override
+  Future<void> saveModeReglement(ModeReglement mode) => _send(
+    'PUT',
+    '/modes-reglement/${_segment(mode.id)}',
+    modeReglementToJson(mode),
+  );
+
+  @override
+  Future<void> deleteModeReglement(ModeReglement mode) =>
+      _send('DELETE', '/modes-reglement/${_segment(mode.id)}');
+
+  @override
+  Future<MiseAJourResultat> miseAJourComptable({
+    required String du,
+    required String au,
+    required List<String> categories,
+  }) async {
+    final json =
+        await _send('POST', '/comptabilite/mise-a-jour', {
+              'du': du,
+              'au': au,
+              'categories': categories,
+            })
+            as Map<String, dynamic>;
+    return MiseAJourResultat(
+      (json['ecritures'] as num).toInt(),
+      {
+        for (final entry
+            in (json['categories'] as Map<String, dynamic>).entries)
+          entry.key: (
+            ((entry.value as Map)['ecritures'] as num).toInt(),
+            ((entry.value as Map)['montant'] as num).toDouble(),
+          ),
+      },
+      ((json['ignores'] as List?) ?? const []).cast<String>(),
+    );
+  }
+
+  @override
+  Future<JournauxSynthese> journauxComptables(int annee) async {
+    final json =
+        await _send('GET', '/comptabilite/journaux?annee=$annee')
+            as Map<String, dynamic>;
+    final last = json['derniereMiseAJour'] as Map<String, dynamic>?;
+    return JournauxSynthese(
+      [
+        for (final p in (json['periodes'] as List).cast<Map<String, dynamic>>())
+          JournalPeriode(
+            journal: p['journal'] as String,
+            mois: p['mois'] as String,
+            ecritures: (p['ecritures'] as num).toInt(),
+            debit: (p['debit'] as num).toDouble(),
+            credit: (p['credit'] as num).toDouble(),
+          ),
+      ],
+      last == null
+          ? ''
+          : 'Dernière mise à jour le ${last['le']} par ${last['auteur']} '
+                '(du ${last['du']} au ${last['au']}, ${last['ecritures']} écritures)',
+    );
+  }
+
+  @override
+  Future<List<EcritureLigne>> ecritures(String journal, String mois) async {
+    final rows =
+        await _send(
+              'GET',
+              '/comptabilite/ecritures?journal=${Uri.encodeQueryComponent(journal)}&mois=$mois',
+            )
+            as List;
+    return [
+      for (final r in rows.cast<Map<String, dynamic>>())
+        EcritureLigne(
+          ecriture: (r['ecriture'] as num).toInt(),
+          date: r['date'] as String? ?? '',
+          piece: r['piece'] as String? ?? '',
+          libelle: r['libelle'] as String? ?? '',
+          compte: r['compte'] as String? ?? '',
+          libelleLigne: r['libelleLigne'] as String? ?? '',
+          debit: (r['debit'] as num).toDouble(),
+          credit: (r['credit'] as num).toDouble(),
+        ),
+    ];
+  }
+
+  @override
   Future<void> saveDossier(TransitDossier dossier) async {
     final result = await _send(
       'PUT',
@@ -230,6 +389,7 @@ class MemoryErpBackend implements ErpBackend {
   final List<JournalCode> journaux = [];
   final List<Voyage> voyages = [];
   final List<TransitDossier> dossiers = [];
+  final List<ModeReglement> modesReglement = [];
   final Map<String, String> _passwords = {};
 
   MemoryErpBackend({String adminPassword = '1234'})
@@ -291,6 +451,7 @@ class MemoryErpBackend implements ErpBackend {
       journaux: [...journaux],
       voyages: [...voyages],
       dossiers: [...dossiers],
+      modesReglement: [...modesReglement],
     );
   }
 
@@ -335,6 +496,30 @@ class MemoryErpBackend implements ErpBackend {
   @override
   Future<void> saveVoyage(Voyage voyage) async =>
       _upsert(voyages, voyage, (v) => v.id == voyage.id);
+
+  @override
+  Future<void> saveModeReglement(ModeReglement mode) async =>
+      _upsert(modesReglement, mode, (m) => m.id == mode.id);
+
+  @override
+  Future<void> deleteModeReglement(ModeReglement mode) async =>
+      modesReglement.removeWhere((m) => m.id == mode.id);
+
+  // La version en mémoire n'a pas de comptabilité : rien à déverser.
+  @override
+  Future<MiseAJourResultat> miseAJourComptable({
+    required String du,
+    required String au,
+    required List<String> categories,
+  }) async => MiseAJourResultat(0, {for (final c in categories) c: (0, 0)}, []);
+
+  @override
+  Future<JournauxSynthese> journauxComptables(int annee) async =>
+      const JournauxSynthese([], '');
+
+  @override
+  Future<List<EcritureLigne>> ecritures(String journal, String mois) async =>
+      const [];
 
   @override
   Future<void> saveDossier(TransitDossier dossier) async {

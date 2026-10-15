@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show TextInput;
+import 'package:flutter/services.dart' show TextInput, rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -19,11 +19,13 @@ import 'models.dart';
 export 'erp_backend.dart' show ErpBackend, MemoryErpBackend, erpBackend;
 export 'models.dart';
 
+part 'pages/comptabilite_pages.dart';
 part 'pages/dossier_dialogs.dart';
 part 'pages/dossiers_page.dart';
 part 'pages/facture_transitaire_page.dart';
 part 'widgets/erp_documents.dart';
 part 'widgets/erp_grid.dart';
+part 'widgets/tiers_accounts.dart';
 part 'widgets/user_photo.dart';
 
 // Fonction globale pour formater les montants
@@ -113,6 +115,7 @@ final List<Prestataire> _prestataires = [];
 final List<PlanAccount> _planAccounts = [];
 final List<JournalCode> _journalCodes = [];
 final List<Voyage> _voyages = [];
+final List<ModeReglement> _modesReglement = [];
 
 void _loadErpData(ErpData data) {
   _currentUser = data.user;
@@ -137,6 +140,9 @@ void _loadErpData(ErpData data) {
   _voyages
     ..clear()
     ..addAll(data.voyages);
+  _modesReglement
+    ..clear()
+    ..addAll(data.modesReglement);
 }
 
 class TransitTrackerApp extends StatelessWidget {
@@ -798,10 +804,15 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           journals: _journalCodes,
         );
       case 'Code journaux':
-        return JournalCodesPage(
+        return JournauxEtModesPage(
           journals: _journalCodes,
           comptes: _planAccounts,
+          modes: _modesReglement,
         );
+      case 'Balance Agées':
+        return BalanceAgeePage(clients: _clients, dossiers: _dossiers);
+      case 'Saisie des Journaux':
+        return SaisieJournauxPage(journals: _journalCodes);
       case 'Facture Client':
         return DossierInvoicesPage(
           dossiers: _dossiers,
@@ -820,6 +831,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           dossiers: _dossiers,
           prestataires: _prestataires,
           journals: _journalCodes,
+          modes: _modesReglement,
         );
       case 'Facture Transporteur':
         return DossierInvoicesPage(
@@ -4113,6 +4125,12 @@ class _PrestatairesPageState extends State<PrestatairesPage> {
     )) {
       return;
     }
+    _linkTiersAccount(
+      widget.comptes,
+      tiersId: prestataire.id,
+      previousCode: initial?.compteComptable,
+      newCode: prestataire.compteComptable,
+    );
     if (mounted) {
       setState(() {
         final index = widget.prestataires.indexWhere(
@@ -4304,23 +4322,47 @@ class _PrestataireFormDialogState extends State<_PrestataireFormDialog> {
                   maxLines: 2,
                 ),
                 const SizedBox(height: 14),
-                SearchableDropdownFormField<PlanAccount>(
+                KeyedSubtree(
                   key: const ValueKey('provider-account-picker'),
-                  options: widget.comptes
-                      .where(
-                        (account) =>
-                            account.nature == 'Fournisseur' &&
-                            (account.tiersId == null ||
-                                account.tiersId == _selectedAccount?.tiersId),
-                      )
-                      .toList(),
-                  value: _selectedAccount,
-                  label: 'Compte comptable fournisseur *',
-                  emptyText: 'Aucun compte de nature Fournisseur dans le plan',
-                  displayString: (account) =>
-                      '${account.code} • ${account.libelle}',
-                  onChanged: (account) =>
-                      setState(() => _selectedAccount = account),
+                  child: SearchableDropdownFormField<PlanAccount>(
+                    key: ValueKey(
+                      'provider-account-picker-${widget.comptes.length}',
+                    ),
+                    options: _accountsForTiers(
+                      widget.comptes,
+                      nature: 'Fournisseur',
+                      classPrefix: '40',
+                      tiersId: widget.initial?.id,
+                    ),
+                    value: _selectedAccount,
+                    label: 'Compte comptable fournisseur *',
+                    emptyText:
+                        'Aucun compte fournisseur libre : utilisez « Créer un compte »',
+                    displayString: (account) =>
+                        '${account.code} • ${account.libelle}',
+                    onChanged: (account) =>
+                        setState(() => _selectedAccount = account),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    key: const ValueKey('provider-account-create'),
+                    onPressed: () async {
+                      final account = await _quickCreateAccount(
+                        context,
+                        comptes: widget.comptes,
+                        nature: 'Fournisseur',
+                        prefix: '401',
+                        suggestedName: _entreprise.text,
+                      );
+                      if (account != null && mounted) {
+                        setState(() => _selectedAccount = account);
+                      }
+                    },
+                    icon: const Icon(Icons.add_circle_outline_rounded),
+                    label: const Text('Créer un compte fournisseur'),
+                  ),
                 ),
               ],
             ),
@@ -4398,17 +4440,6 @@ class _PrestataireFormDialogState extends State<_PrestataireFormDialog> {
     final openingBalance = double.parse(
       _soldeInitial.text.trim().replaceAll(' ', '').replaceAll(',', '.'),
     );
-    if (widget.initial != null &&
-        widget.initial!.compteComptable != account.code) {
-      for (final previousAccount in widget.comptes) {
-        if (previousAccount.code == widget.initial!.compteComptable &&
-            previousAccount.tiersId == id) {
-          previousAccount.tiersId = null;
-          break;
-        }
-      }
-    }
-    account.tiersId ??= id;
     Navigator.pop(
       context,
       Prestataire(
@@ -6012,6 +6043,12 @@ class _ClientsPageState extends State<ClientsPage> {
     );
     if (client == null || !mounted) return;
     if (!await _persist(context, () => erpBackend.saveClient(client))) return;
+    _linkTiersAccount(
+      widget.comptes,
+      tiersId: client.id,
+      previousCode: initial?.compteComptable,
+      newCode: client.compteComptable,
+    );
     if (mounted) {
       setState(() {
         final index = widget.clients.indexWhere((item) => item.id == client.id);
@@ -6129,23 +6166,47 @@ class _ClientFormDialogState extends State<_ClientFormDialog> {
                   title: const Text('Assujetti à la TVA'),
                   onChanged: (value) => setState(() => _vat = value ?? false),
                 ),
-                SearchableDropdownFormField<PlanAccount>(
+                KeyedSubtree(
                   key: const ValueKey('client-account-picker'),
-                  options: widget.comptes
-                      .where(
-                        (account) =>
-                            account.nature == 'Client' &&
-                            (account.tiersId == null ||
-                                account.tiersId == _selectedAccount?.tiersId),
-                      )
-                      .toList(),
-                  value: _selectedAccount,
-                  label: 'Compte comptable client *',
-                  emptyText: 'Aucun compte de nature Client dans le plan',
-                  displayString: (account) =>
-                      '${account.code} • ${account.libelle}',
-                  onChanged: (account) =>
-                      setState(() => _selectedAccount = account),
+                  child: SearchableDropdownFormField<PlanAccount>(
+                    key: ValueKey(
+                      'client-account-picker-${widget.comptes.length}',
+                    ),
+                    options: _accountsForTiers(
+                      widget.comptes,
+                      nature: 'Client',
+                      classPrefix: '41',
+                      tiersId: widget.initial?.id,
+                    ),
+                    value: _selectedAccount,
+                    label: 'Compte comptable client *',
+                    emptyText:
+                        'Aucun compte client libre : utilisez « Créer un compte »',
+                    displayString: (account) =>
+                        '${account.code} • ${account.libelle}',
+                    onChanged: (account) =>
+                        setState(() => _selectedAccount = account),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    key: const ValueKey('client-account-create'),
+                    onPressed: () async {
+                      final account = await _quickCreateAccount(
+                        context,
+                        comptes: widget.comptes,
+                        nature: 'Client',
+                        prefix: '411',
+                        suggestedName: _name.text,
+                      );
+                      if (account != null && mounted) {
+                        setState(() => _selectedAccount = account);
+                      }
+                    },
+                    icon: const Icon(Icons.add_circle_outline_rounded),
+                    label: const Text('Créer un compte client'),
+                  ),
                 ),
               ],
             ),
@@ -6233,18 +6294,6 @@ class _ClientFormDialogState extends State<_ClientFormDialog> {
     final openingBalance = double.parse(
       _openingBalance.text.trim().replaceAll(' ', '').replaceAll(',', '.'),
     );
-    if (_selectedAccount != null &&
-        widget.initial != null &&
-        widget.initial!.compteComptable != account.code) {
-      for (final previousAccount in widget.comptes) {
-        if (previousAccount.code == widget.initial!.compteComptable &&
-            previousAccount.tiersId == id) {
-          previousAccount.tiersId = null;
-          break;
-        }
-      }
-    }
-    account.tiersId ??= id;
     Navigator.pop(
       context,
       Client(

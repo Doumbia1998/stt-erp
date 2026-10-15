@@ -370,3 +370,20 @@ Map<String, dynamic> dossierToJson(TransitDossier dossier) => {
       },
   ],
 };
+
+ModeReglement modeReglementFromJson(Map<String, dynamic> json) => ModeReglement(
+  id: json['id'] as String,
+  intitule: _str(json['intitule']),
+  type: _str(json['type']),
+  journalClient: _str(json['journalClient']),
+  journalFournisseur: _str(json['journalFournisseur']),
+  compteTresorerie: _str(json['compteTresorerie']),
+);
+
+Map<String, dynamic> modeReglementToJson(ModeReglement mode) => {
+  'intitule': mode.intitule,
+  'type': mode.type,
+  'journalClient': mode.journalClient,
+  'journalFournisseur': mode.journalFournisseur,
+  'compteTresorerie': mode.compteTresorerie,
+};

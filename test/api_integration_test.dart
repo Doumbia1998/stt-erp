@@ -88,6 +88,24 @@ void main() {
       await backend.saveDossier(dossier);
       expect(dossier.version, 2);
 
+      // Mise à jour comptable : facture et règlement déversés et équilibrés.
+      final update = await backend.miseAJourComptable(
+        du: '01/10/2026',
+        au: '31/10/2026',
+        categories: const ['ventes', 'reglements'],
+      );
+      expect(update.ecritures, greaterThanOrEqualTo(2));
+      final synthese = await backend.journauxComptables(2026);
+      for (final periode in synthese.periodes) {
+        expect(periode.debit, periode.credit);
+      }
+      final ventes = await backend.ecritures('VEN', '2026-10');
+      expect(
+        ventes.any((l) => l.compte == account.code && l.debit == 75000),
+        isTrue,
+      );
+      expect(synthese.derniereMiseAJour, contains('31/10/2026'));
+
       // Une seconde session (autre poste) retrouve tout.
       final data = await HttpErpBackend(_url).login('admin', _password);
       final reloaded = data.dossiers.singleWhere((d) => d.id == dossier.id);

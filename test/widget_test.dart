@@ -7,6 +7,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 
 import 'package:stt/main.dart';
 import 'package:stt/models_json.dart';
@@ -749,6 +750,118 @@ void main() {
     await tester.pumpAndSettle();
     expect(inInvoices(find.text('Non acquittée')), findsOneWidget);
     expect(dossier.operations, isEmpty);
+  });
+
+  testWidgets('Accounting pages: aged balance, payment modes and journals', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    String daysAgo(int days) => DateFormat(
+      'dd/MM/yyyy',
+    ).format(DateTime.now().subtract(Duration(days: days)));
+    final client = Client(
+      id: 'client-b',
+      nom: 'MAH KEITA',
+      telephone: '',
+      compteComptable: '411MAHKEIT',
+    );
+    TransitDossier invoiced(String id, int age, double amount) {
+      final dossier = TransitDossier(
+        id: id,
+        numDossier: 'STT-$id',
+        numBL: '',
+        numLB: '',
+        client: client,
+        nbConteneurs: 0,
+        dateDebut: daysAgo(age),
+      );
+      dossier.factureClient
+        ..statut = 'Clôturée'
+        ..montant = amount
+        ..dateEmission = daysAgo(age);
+      return dossier;
+    }
+
+    final old = invoiced('old', 60, 100000)
+      ..operations.add(
+        DossierOperation(
+          type: DossierOperationType.clientPayment,
+          titre: 'Acompte',
+          montant: 30000,
+          date: '${daysAgo(5)} 10:00',
+        ),
+      );
+    final recent = invoiced('recent', 10, 50000);
+    (erpBackend as MemoryErpBackend)
+      ..clients.add(client)
+      ..dossiers.addAll([old, recent])
+      ..journaux.add(
+        JournalCode(
+          code: 'BQ',
+          intitule: 'Banque BIM',
+          type: 'Banque',
+          compteTresorerie: '521000',
+        ),
+      );
+
+    await tester.pumpWidget(const TransitTrackerApp());
+    await tester.enterText(find.byType(TextField).at(0), 'admin');
+    await tester.enterText(find.byType(TextField).at(1), '1234');
+    await tester.tap(find.text('SE CONNECTER'));
+    await tester.pumpAndSettle();
+
+    Future<void> open(String item) async {
+      await tester.ensureVisible(find.byTooltip('Comptabilité'));
+      await tester.tap(find.byTooltip('Comptabilité'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(item).last);
+      await tester.pumpAndSettle();
+    }
+
+    // Balance âgée : 70 000 de plus de 46 jours (après acompte) + 50 000 à 1-15 j.
+    await open('Balance Agées');
+    final totalText = tester
+        .widget<Text>(find.byKey(const ValueKey('aged-balance-total')))
+        .data!;
+    expect(totalText.replaceAll(RegExp(r'\D'), ''), '1200001');
+    final grid = find.byKey(const ValueKey('aged-balance-grid'));
+    Finder inGrid(Finder f) => find.descendant(of: grid, matching: f);
+    expect(inGrid(find.text('411MAHKEIT')), findsOneWidget);
+    expect(inGrid(find.textContaining(RegExp(r'^70\D000$'))), findsOneWidget);
+    expect(inGrid(find.textContaining(RegExp(r'^50\D000$'))), findsOneWidget);
+
+    // Modes de règlement dans le module des codes journaux.
+    await open('Code journaux');
+    await tester.tap(find.text('Modes de règlement'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('mode-intitule')),
+      'virement bim',
+    );
+    await tester.tap(find.byKey(const ValueKey('mode-save')));
+    await tester.pumpAndSettle();
+    expect(find.text('VIREMENT BIM'), findsOneWidget);
+    expect(
+      (erpBackend as MemoryErpBackend).modesReglement.single.intitule,
+      'VIREMENT BIM',
+    );
+
+    // Saisie des journaux : journaux du mois et mise à jour comptable.
+    await open('Saisie des Journaux');
+    expect(find.text('Saisie des journaux'), findsOneWidget);
+    expect(find.textContaining('Banque BIM'), findsWidgets);
+    await tester.tap(find.byKey(const ValueKey('accounting-update')));
+    await tester.pumpAndSettle();
+    expect(find.text('Mise à jour de la comptabilité'), findsOneWidget);
+    expect(find.text('Factures de Ventes'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('accounting-run')));
+    await tester.pumpAndSettle();
+    expect(find.text('0 écriture(s) comptabilisée(s)'), findsOneWidget);
+    await tester.tap(find.text('Compris'));
+    await tester.pumpAndSettle();
   });
 
   test('Dossier balances keep the client and provider accounts separate', () {

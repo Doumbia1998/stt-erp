@@ -8,7 +8,9 @@ const {
   compteJson,
   journalJson,
   voyageJson,
+  modeReglementJson,
 } = require('./routes/referentiels');
+const { comptabiliteRouter } = require('./routes/comptabilite');
 const { dossiersRouter, loadDossiers } = require('./routes/dossiers');
 
 function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
@@ -91,7 +93,7 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
   // Toutes les données de l'ERP, chargées après la connexion.
   api.get('/donnees', async (req, res, next) => {
     try {
-      const [clients, prestataires, comptes, journaux, voyages, dossiers, users] =
+      const [clients, prestataires, comptes, journaux, voyages, dossiers, users, modes] =
         await Promise.all([
           pool.query('SELECT * FROM clients ORDER BY cree_le, id'),
           pool.query('SELECT * FROM prestataires ORDER BY cree_le, id'),
@@ -102,6 +104,7 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
           isAdmin(req.user)
             ? pool.query('SELECT * FROM utilisateurs ORDER BY cree_le, id')
             : { rows: [] },
+          pool.query('SELECT * FROM modes_reglement ORDER BY lower(intitule)'),
         ]);
       res.json({
         utilisateur: req.user,
@@ -111,6 +114,7 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
         comptes: comptes.rows.map(compteJson),
         journaux: journaux.rows.map(journalJson),
         voyages: voyages.rows.map(voyageJson),
+        modesReglement: modes.rows.map(modeReglementJson),
         dossiers,
       });
     } catch (error) {
@@ -120,6 +124,7 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
 
   api.use(referentielsRouter(pool));
   api.use(dossiersRouter(pool));
+  api.use(comptabiliteRouter(pool));
   app.use('/api/v1', api);
 
   app.use((_req, res) => {

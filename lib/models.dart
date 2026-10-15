@@ -482,3 +482,24 @@ class Prestataire {
     this.compteComptable = '',
   });
 }
+
+// Mode de règlement (espèces, chèque, virement…) relié aux journaux comptables.
+class ModeReglement {
+  final String id;
+  String intitule;
+  String type;
+  String journalClient;
+  String journalFournisseur;
+  String compteTresorerie;
+
+  ModeReglement({
+    required this.id,
+    required this.intitule,
+    required this.type,
+    this.journalClient = '',
+    this.journalFournisseur = '',
+    this.compteTresorerie = '',
+  });
+
+  bool get estCheque => type == 'Chèque';
+}

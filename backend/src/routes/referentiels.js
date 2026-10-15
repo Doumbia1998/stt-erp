@@ -71,6 +71,15 @@ const journalJson = (r) => ({
   compteTresorerie: r.compte_tresorerie ?? '',
 });
 
+const modeReglementJson = (r) => ({
+  id: r.id,
+  intitule: r.intitule,
+  type: r.type,
+  journalClient: r.journal_client ?? '',
+  journalFournisseur: r.journal_fournisseur ?? '',
+  compteTresorerie: r.compte_tresorerie ?? '',
+});
+
 const voyageJson = (r) => ({
   id: r.id,
   dossierId: r.dossier_id,
@@ -385,6 +394,44 @@ function referentielsRouter(pool) {
     }
   });
 
+  router.put('/modes-reglement/:id', requireModule('Comptabilité'), async (req, res, next) => {
+    try {
+      const b = req.body;
+      const { rows } = await pool.query(
+        `INSERT INTO modes_reglement (id, intitule, type, journal_client,
+           journal_fournisseur, compte_tresorerie)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (id) DO UPDATE SET
+           intitule = EXCLUDED.intitule, type = EXCLUDED.type,
+           journal_client = EXCLUDED.journal_client,
+           journal_fournisseur = EXCLUDED.journal_fournisseur,
+           compte_tresorerie = EXCLUDED.compte_tresorerie, modifie_le = now()
+         RETURNING *`,
+        [
+          id(req),
+          text(b, 'intitule', { required: true, max: 80 }),
+          text(b, 'type', { required: true, max: 40 }),
+          optionalRef(b, 'journalClient'),
+          optionalRef(b, 'journalFournisseur'),
+          optionalRef(b, 'compteTresorerie'),
+        ],
+      );
+      res.json(modeReglementJson(rows[0]));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.delete('/modes-reglement/:id', requireModule('Comptabilité'), async (req, res, next) => {
+    try {
+      const { rowCount } = await pool.query('DELETE FROM modes_reglement WHERE id = $1', [id(req)]);
+      if (rowCount === 0) throw notFound('Mode de règlement introuvable.');
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Chaque utilisateur peut changer sa propre photo.
   router.put('/moi/photo', async (req, res, next) => {
     try {
@@ -410,4 +457,5 @@ module.exports = {
   compteJson,
   journalJson,
   voyageJson,
+  modeReglementJson,
 };

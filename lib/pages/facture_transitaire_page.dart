@@ -2,7 +2,7 @@ part of '../main.dart';
 
 // --- FACTURES TRANSITAIRE : factures, détails par véhicule/conteneur, règlements ---
 
-enum _PaidFilter { all, paid, unpaid }
+enum _PaidFilter { all, toInvoice, paid, unpaid }
 
 const _transitairePaymentCategory = 'Règlement Transitaire';
 const _paymentModes = [
@@ -16,12 +16,14 @@ class FactureTransitairePage extends StatefulWidget {
   final List<TransitDossier> dossiers;
   final List<Prestataire> prestataires;
   final List<JournalCode> journals;
+  final List<ModeReglement> modes;
 
   const FactureTransitairePage({
     super.key,
     required this.dossiers,
     required this.prestataires,
     required this.journals,
+    this.modes = const [],
   });
 
   @override
@@ -44,20 +46,38 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
   double _balance(TransitDossier d) => _invoice(d).montant - _paid(d);
   bool _isPaid(TransitDossier d) => _invoice(d).montant > 0 && _balance(d) <= 0;
 
-  List<TransitDossier> get _invoiced =>
-      widget.dossiers.where((d) => _invoice(d).statut != 'Brouillon').toList();
+  // Dossier affecté à un transitaire mais pas encore facturé par lui.
+  bool _isPending(TransitDossier d) => _invoice(d).statut == 'Brouillon';
+
+  // Factures existantes + dossiers des transitaires encore à facturer.
+  List<TransitDossier> get _rowsSource => widget.dossiers
+      .where(
+        (d) =>
+            !_isPending(d) || (d.transitaireAffecte != null && !d.estCloture),
+      )
+      .toList();
 
   List<TransitDossier> get _filtered {
     final query = _query.trim().toLowerCase();
-    return _invoiced.where((d) {
-      final date = _parseFrDate(_invoice(d).dateEmission);
+    return _rowsSource.where((d) {
+      final date = _parseFrDate(
+        _isPending(d) ? d.dateCreation : _invoice(d).dateEmission,
+      );
       if (!_inPeriod(date, _from, _to)) return false;
       if (_transitaire != null &&
           d.transitaireAffecte?.id != _transitaire!.id) {
         return false;
       }
-      if (_paidFilter == _PaidFilter.paid && !_isPaid(d)) return false;
-      if (_paidFilter == _PaidFilter.unpaid && _isPaid(d)) return false;
+      switch (_paidFilter) {
+        case _PaidFilter.all:
+          break;
+        case _PaidFilter.toInvoice:
+          if (!_isPending(d)) return false;
+        case _PaidFilter.paid:
+          if (_isPending(d) || !_isPaid(d)) return false;
+        case _PaidFilter.unpaid:
+          if (_isPending(d) || _isPaid(d)) return false;
+      }
       if (query.isEmpty) return true;
       return _invoiceColumns
           .map((c) => c.value(d))
@@ -72,19 +92,27 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
       label: 'ID',
       width: 70,
       numeric: true,
-      value: (d) => _invoice(d).numero == 0 ? '' : '${_invoice(d).numero}',
+      value: (d) => _isPending(d) || _invoice(d).numero == 0
+          ? ''
+          : '${_invoice(d).numero}',
       sortValue: (d) => _invoice(d).numero,
     ),
     ErpGridColumn(
       label: 'Numéro de facture',
       width: 175,
-      value: (d) => _invoice(d).reference,
+      value: (d) => _isPending(d) ? '—' : _invoice(d).reference,
     ),
     ErpGridColumn(
       label: 'Statut',
       width: 140,
-      value: (d) => _isPaid(d) ? 'Acquittée' : 'Non acquittée',
-      builder: (d) => _isPaid(d)
+      value: (d) => _isPending(d)
+          ? 'À facturer'
+          : _isPaid(d)
+          ? 'Acquittée'
+          : 'Non acquittée',
+      builder: (d) => _isPending(d)
+          ? const ErpStatusChip('À facturer', Color(0xFF2563EB))
+          : _isPaid(d)
           ? const ErpStatusChip('Acquittée', Color(0xFF15803D))
           : const ErpStatusChip('Non acquittée', Color(0xFFEA580C)),
     ),
@@ -283,8 +311,13 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
     final selectedPayment = payments.any((p) => p.id == _selectedPayment?.id)
         ? _selectedPayment
         : null;
-    final total = rows.fold<double>(0, (sum, d) => sum + _invoice(d).montant);
-    final paid = rows.fold<double>(0, (sum, d) => sum + _paid(d));
+    final invoicedRows = rows.where((d) => !_isPending(d));
+    final total = invoicedRows.fold<double>(
+      0,
+      (sum, d) => sum + _invoice(d).montant,
+    );
+    final paid = invoicedRows.fold<double>(0, (sum, d) => sum + _paid(d));
+    final pendingCount = rows.where(_isPending).length;
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6FB),
       body: LayoutBuilder(
@@ -305,20 +338,37 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
               }),
               onOpen: _edit,
               emptyIcon: Icons.receipt_long_outlined,
-              emptyText: _invoiced.isEmpty
-                  ? 'Aucune facture transitaire. Cliquez sur « Nouvelle facture ».'
+              emptyText: _rowsSource.isEmpty
+                  ? 'Aucun dossier affecté à un transitaire pour le moment.'
                   : 'Aucune facture ne correspond aux filtres.',
             ),
           );
           final details = _section(
             title: selected == null
                 ? 'Détails de la facture'
+                : _isPending(selected)
+                ? 'Conteneurs à facturer • ${selected.numDossier}'
                 : 'Détails de la facture ${_invoice(selected).reference}',
             icon: Icons.local_shipping_rounded,
             child: ErpGrid<InvoiceLine>(
               key: const ValueKey('transitaire-lines-grid'),
               columns: _lineColumns,
-              rows: selected == null ? const [] : _invoice(selected).lignes,
+              rows: selected == null
+                  ? const []
+                  : _isPending(selected)
+                  ? [
+                      for (final c in selected.conteneurs)
+                        InvoiceLine(
+                          description: 'Conteneur ${c.numero}',
+                          quantite: 1,
+                          prixUnitaire: 0,
+                          numeroConteneur: c.numero,
+                          typeConteneur: c.type,
+                          marchandise: c.marchandise,
+                          bl: selected.numBL,
+                        ),
+                    ]
+                  : _invoice(selected).lignes,
               rowId: (l) =>
                   '${l.numeroConteneur}-${l.plaqueVehicule}-${l.hashCode}',
               emptyIcon: Icons.touch_app_outlined,
@@ -372,7 +422,7 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
                     children: [
                       _buildToolbar(selected, total, paid),
                       const SizedBox(height: 12),
-                      _buildFilters(rows.length),
+                      _buildFilters(rows.length, pendingCount),
                       const SizedBox(height: 12),
                       SizedBox(
                         height: math.max(660, constraints.maxHeight - 360),
@@ -400,7 +450,7 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
                     children: [
                       _buildToolbar(selected, total, paid),
                       const SizedBox(height: 12),
-                      _buildFilters(rows.length),
+                      _buildFilters(rows.length, pendingCount),
                       const SizedBox(height: 12),
                       SizedBox(height: 380, child: invoiceGrid),
                       const SizedBox(height: 12),
@@ -580,7 +630,7 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
     );
   }
 
-  Widget _buildFilters(int count) => _card(
+  Widget _buildFilters(int count, int pending) => _card(
     Wrap(
       spacing: 12,
       runSpacing: 12,
@@ -615,6 +665,10 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
           showSelectedIcon: false,
           segments: const [
             ButtonSegment(value: _PaidFilter.all, label: Text('Toutes')),
+            ButtonSegment(
+              value: _PaidFilter.toInvoice,
+              label: Text('À facturer'),
+            ),
             ButtonSegment(value: _PaidFilter.paid, label: Text('Acquittées')),
             ButtonSegment(
               value: _PaidFilter.unpaid,
@@ -646,7 +700,7 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
             borderRadius: BorderRadius.circular(20),
           ),
           child: Text(
-            '$count facture(s)',
+            '$count ligne(s) • $pending à facturer',
             style: const TextStyle(
               color: Color(0xFFC2410C),
               fontWeight: FontWeight.w600,
@@ -658,6 +712,13 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
   );
 
   Future<void> _create() async {
+    final selected = _selected;
+    if (selected != null &&
+        _isPending(selected) &&
+        _filtered.any((d) => d.id == selected.id)) {
+      await _openEditor(selected);
+      return;
+    }
     final candidates = widget.dossiers
         .where(
           (d) =>
@@ -685,6 +746,10 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
   }
 
   Future<void> _edit(TransitDossier dossier) async {
+    if (_isPending(dossier)) {
+      if (!dossier.estCloture) await _openEditor(dossier);
+      return;
+    }
     if (_paid(dossier) > 0) {
       await _showInfoAlert(
         context,
@@ -721,6 +786,14 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
   }
 
   Future<void> _delete(TransitDossier dossier) async {
+    if (_isPending(dossier)) {
+      await _showInfoAlert(
+        context,
+        title: 'Aucune facture',
+        message: 'Ce dossier n’a pas encore de facture transitaire.',
+      );
+      return;
+    }
     if (_paid(dossier) > 0 || dossier.estCloture) {
       await _showInfoAlert(
         context,
@@ -785,6 +858,15 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
   }
 
   Future<void> _addPayment(TransitDossier dossier) async {
+    if (_isPending(dossier)) {
+      await _showInfoAlert(
+        context,
+        title: 'Facture à créer',
+        message:
+            'Créez d’abord la facture de ce dossier avec « Nouvelle facture ».',
+      );
+      return;
+    }
     if (dossier.estCloture) {
       await _showInfoAlert(
         context,
@@ -801,7 +883,7 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
       );
       return;
     }
-    if (widget.journals.isEmpty) {
+    if (widget.journals.isEmpty && widget.modes.isEmpty) {
       await _showInfoAlert(
         context,
         title: 'Caisse requise',
@@ -814,6 +896,7 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
       context: context,
       builder: (context) => _PaymentDialog(
         journals: widget.journals,
+        modes: widget.modes,
         balance: _balance(dossier),
         invoiceReference: _invoice(dossier).reference,
       ),
@@ -1391,11 +1474,13 @@ class _TransitaireInvoiceDialogState extends State<_TransitaireInvoiceDialog> {
 // Nouveau règlement d'une facture.
 class _PaymentDialog extends StatefulWidget {
   final List<JournalCode> journals;
+  final List<ModeReglement> modes;
   final double balance;
   final String invoiceReference;
 
   const _PaymentDialog({
     required this.journals,
+    this.modes = const [],
     required this.balance,
     required this.invoiceReference,
   });
@@ -1414,6 +1499,12 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   DateTime _date = DateTime.now();
   JournalCode? _journal;
   String _mode = _paymentModes.first;
+  ModeReglement? _modeReglement;
+
+  // Avec des modes de règlement, la caisse vient du journal « fournisseurs » du mode.
+  bool get _useModes => widget.modes.isNotEmpty;
+  bool get _isCheque =>
+      _useModes ? (_modeReglement?.estCheque ?? false) : _mode == 'Chèque';
 
   @override
   void initState() {
@@ -1485,40 +1576,72 @@ class _PaymentDialogState extends State<_PaymentDialog> {
                 },
               ),
               const SizedBox(height: 12),
-              DropdownButtonFormField<JournalCode>(
-                key: const ValueKey('payment-journal'),
-                isExpanded: true,
-                initialValue: _journal,
-                decoration: _inputDecoration(
-                  'Caisse *',
-                  icon: Icons.account_balance_wallet_outlined,
+              if (_useModes)
+                DropdownButtonFormField<ModeReglement>(
+                  key: const ValueKey('payment-mode'),
+                  isExpanded: true,
+                  initialValue: _modeReglement,
+                  decoration: _inputDecoration(
+                    'Mode de règlement *',
+                    icon: Icons.payments_outlined,
+                  ),
+                  items: [
+                    for (final mode in widget.modes)
+                      DropdownMenuItem(
+                        value: mode,
+                        child: Text(
+                          mode.journalFournisseur.isEmpty
+                              ? mode.intitule
+                              : '${mode.intitule} • journal ${mode.journalFournisseur}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                  validator: (value) {
+                    if (value == null) return 'Choisissez le mode de règlement';
+                    if (value.journalFournisseur.isEmpty) {
+                      return 'Ce mode n’a pas de journal « règlement fournisseurs »';
+                    }
+                    return null;
+                  },
+                  onChanged: (value) => setState(() => _modeReglement = value),
                 ),
-                items: [
-                  for (final journal in widget.journals)
-                    DropdownMenuItem(
-                      value: journal,
-                      child: Text('${journal.code} • ${journal.intitule}'),
-                    ),
-                ],
-                validator: (value) =>
-                    value == null ? 'Choisissez la caisse' : null,
-                onChanged: (value) => setState(() => _journal = value),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                isExpanded: true,
-                initialValue: _mode,
-                decoration: _inputDecoration(
-                  'Mode de paiement',
-                  icon: Icons.credit_card_rounded,
+              if (!_useModes) ...[
+                DropdownButtonFormField<JournalCode>(
+                  key: const ValueKey('payment-journal'),
+                  isExpanded: true,
+                  initialValue: _journal,
+                  decoration: _inputDecoration(
+                    'Caisse *',
+                    icon: Icons.account_balance_wallet_outlined,
+                  ),
+                  items: [
+                    for (final journal in widget.journals)
+                      DropdownMenuItem(
+                        value: journal,
+                        child: Text('${journal.code} • ${journal.intitule}'),
+                      ),
+                  ],
+                  validator: (value) =>
+                      value == null ? 'Choisissez la caisse' : null,
+                  onChanged: (value) => setState(() => _journal = value),
                 ),
-                items: [
-                  for (final mode in _paymentModes)
-                    DropdownMenuItem(value: mode, child: Text(mode)),
-                ],
-                onChanged: (value) => setState(() => _mode = value ?? _mode),
-              ),
-              if (_mode == 'Chèque') ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  initialValue: _mode,
+                  decoration: _inputDecoration(
+                    'Mode de paiement',
+                    icon: Icons.credit_card_rounded,
+                  ),
+                  items: [
+                    for (final mode in _paymentModes)
+                      DropdownMenuItem(value: mode, child: Text(mode)),
+                  ],
+                  onChanged: (value) => setState(() => _mode = value ?? _mode),
+                ),
+              ],
+              if (_isCheque) ...[
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _cheque,
@@ -1577,9 +1700,11 @@ class _PaymentDialogState extends State<_PaymentDialog> {
         categorie: _transitairePaymentCategory,
         montant: _parseAmount(_amount.text)!,
         date: DateFormat('dd/MM/yyyy HH:mm').format(date),
-        codeJournal: _journal!.code,
-        modePaiement: _mode,
-        numeroCheque: _mode == 'Chèque' ? _cheque.text.trim() : '',
+        codeJournal: _useModes
+            ? _modeReglement!.journalFournisseur
+            : _journal!.code,
+        modePaiement: _useModes ? _modeReglement!.intitule : _mode,
+        numeroCheque: _isCheque ? _cheque.text.trim() : '',
         observations: _observations.text.trim(),
         auteur: _currentUser?.name ?? '',
         saisiLe: DateFormat('dd/MM/yyyy HH:mm').format(now),
