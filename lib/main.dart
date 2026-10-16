@@ -3906,7 +3906,14 @@ class _PrestataireFormDialogState extends State<_PrestataireFormDialog> {
     super.initState();
     final provider = widget.initial;
     _type = provider?.type ?? 'Transporteur';
-    if (provider == null) return;
+    if (provider == null) {
+      _selectedAccount = _accountsForTiers(
+        widget.comptes,
+        nature: 'Fournisseur',
+        classPrefix: '40',
+      ).firstOrNull;
+      return;
+    }
     _entreprise.text = provider.entreprise;
     _pays.text = provider.pays;
     _villePort.text = provider.villePort;
@@ -4056,36 +4063,16 @@ class _PrestataireFormDialogState extends State<_PrestataireFormDialog> {
                       widget.comptes,
                       nature: 'Fournisseur',
                       classPrefix: '40',
-                      tiersId: widget.initial?.id,
+                      currentCode: widget.initial?.compteComptable,
                     ),
                     value: _selectedAccount,
                     label: 'Compte comptable fournisseur *',
                     emptyText:
-                        'Aucun compte fournisseur libre : utilisez « Créer un compte »',
+                        'Aucun compte fournisseur (401…) dans le plan comptable',
                     displayString: (account) =>
                         '${account.code} • ${account.libelle}',
                     onChanged: (account) =>
                         setState(() => _selectedAccount = account),
-                  ),
-                ),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    key: const ValueKey('provider-account-create'),
-                    onPressed: () async {
-                      final account = await _quickCreateAccount(
-                        context,
-                        comptes: widget.comptes,
-                        nature: 'Fournisseur',
-                        prefix: '401',
-                        suggestedName: _entreprise.text,
-                      );
-                      if (account != null && mounted) {
-                        setState(() => _selectedAccount = account);
-                      }
-                    },
-                    icon: const Icon(Icons.add_circle_outline_rounded),
-                    label: const Text('Créer un compte fournisseur'),
                   ),
                 ),
               ],
@@ -5817,7 +5804,14 @@ class _ClientFormDialogState extends State<_ClientFormDialog> {
   void initState() {
     super.initState();
     final client = widget.initial;
-    if (client == null) return;
+    if (client == null) {
+      _selectedAccount = _accountsForTiers(
+        widget.comptes,
+        nature: 'Client',
+        classPrefix: '41',
+      ).firstOrNull;
+      return;
+    }
     _name.text = client.nom;
     _company.text = client.societe;
     _phone.text = client.telephone;
@@ -5900,36 +5894,16 @@ class _ClientFormDialogState extends State<_ClientFormDialog> {
                       widget.comptes,
                       nature: 'Client',
                       classPrefix: '41',
-                      tiersId: widget.initial?.id,
+                      currentCode: widget.initial?.compteComptable,
                     ),
                     value: _selectedAccount,
                     label: 'Compte comptable client *',
                     emptyText:
-                        'Aucun compte client libre : utilisez « Créer un compte »',
+                        'Aucun compte client (411…) dans le plan comptable',
                     displayString: (account) =>
                         '${account.code} • ${account.libelle}',
                     onChanged: (account) =>
                         setState(() => _selectedAccount = account),
-                  ),
-                ),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    key: const ValueKey('client-account-create'),
-                    onPressed: () async {
-                      final account = await _quickCreateAccount(
-                        context,
-                        comptes: widget.comptes,
-                        nature: 'Client',
-                        prefix: '411',
-                        suggestedName: _name.text,
-                      );
-                      if (account != null && mounted) {
-                        setState(() => _selectedAccount = account);
-                      }
-                    },
-                    icon: const Icon(Icons.add_circle_outline_rounded),
-                    label: const Text('Créer un compte client'),
                   ),
                 ),
               ],

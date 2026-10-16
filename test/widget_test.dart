@@ -864,7 +864,7 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('Sub-accounts follow the general account and fee types', (
+  testWidgets('Clients share the general account; fee types get sub-accounts', (
     WidgetTester tester,
   ) async {
     tester.view.physicalSize = const Size(1400, 900);
@@ -940,29 +940,19 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    // Fiche client : le compte proposé est le sous-compte suivant de 41100000.
+    // Fiche client : tous les clients partagent le compte général 41100000.
     await open('Transitaire', 'Clients');
     await tester.tap(find.byIcon(Icons.person_add_alt_1_rounded));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextFormField).at(0), 'Nouveau Client');
-    final create = find.byKey(const ValueKey('client-account-create'));
-    await tester.ensureVisible(create);
-    await tester.tap(create);
-    await tester.pumpAndSettle();
-    expect(
-      tester
-          .widget<TextFormField>(
-            find.byKey(const ValueKey('quick-account-code')),
-          )
-          .controller!
-          .text,
-      '41100002',
+    final picker = find.descendant(
+      of: find.byKey(const ValueKey('client-account-picker')),
+      matching: find.byType(TextFormField),
     );
-    expect(find.text('41100000 — Clients'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('quick-account-save')));
-    await tester.pumpAndSettle();
-    expect(backend.comptes.any((a) => a.code == '41100002'), isTrue);
-    expect(find.text('41100002 • NOUVEAU CLIENT'), findsOneWidget);
+    expect(
+      tester.widget<TextFormField>(picker).controller!.text,
+      '41100000 • Clients',
+    );
+    expect(find.byKey(const ValueKey('client-account-create')), findsNothing);
     await tester.tap(find.text('Annuler').last);
     await tester.pumpAndSettle();
 
