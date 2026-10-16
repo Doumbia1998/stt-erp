@@ -1,8 +1,8 @@
 part of '../main.dart';
 
-// --- FACTURES TRANSITAIRE : factures, détails par véhicule/conteneur, règlements ---
+// --- FACTURES TRANSITAIRE : plusieurs BL / dossiers par facture, camions, règlements ---
 
-enum _PaidFilter { all, toInvoice, paid, unpaid }
+enum _PaidFilter { all, paid, unpaid }
 
 const _transitairePaymentCategory = 'Règlement Transitaire';
 const _paymentModes = [
@@ -12,17 +12,78 @@ const _paymentModes = [
   'Mobile Money',
 ];
 
+// Conteneur d'un dossier que son transitaire peut encore facturer.
+class _AvailableContainer {
+  final TransitDossier dossier;
+  final TransitContainer container;
+
+  const _AvailableContainer(this.dossier, this.container);
+
+  String get cle => '${dossier.id}|${container.numero.toUpperCase()}';
+}
+
+List<_AvailableContainer> _availableContainers(
+  List<TransitDossier> dossiers,
+  List<FactureTransitaire> factures,
+  String transitaireId, {
+  String? exceptFactureId,
+}) {
+  final taken = {
+    for (final f in factures)
+      if (f.id != exceptFactureId)
+        for (final l in f.lignes)
+          if (l.numeroConteneur.isNotEmpty) l.cleConteneur,
+  };
+  return [
+    for (final d in dossiers)
+      if (d.transitaireAffecte?.id == transitaireId && !d.estCloture)
+        for (final c in d.conteneurs)
+          if (c.numero.isNotEmpty &&
+              !taken.contains('${d.id}|${c.numero.toUpperCase()}'))
+            _AvailableContainer(d, c),
+  ];
+}
+
+// Raison empêchant de clôturer un dossier côté transitaire (null si rien ne bloque).
+String? _transitaireClosureIssue(TransitDossier d) {
+  if (d.transitaireAffecte == null) return null;
+  final invoices = _facturesTransitaire
+      .where((f) => f.lignes.any((l) => l.dossierId == d.id))
+      .toList();
+  final invoiced = {
+    for (final f in invoices)
+      for (final l in f.lignes)
+        if (l.dossierId == d.id) l.numeroConteneur.toUpperCase(),
+  };
+  final missing = d.conteneurs
+      .where(
+        (c) =>
+            c.numero.isNotEmpty && !invoiced.contains(c.numero.toUpperCase()),
+      )
+      .length;
+  if (missing > 0) {
+    return '$missing conteneur(s) pas encore facturé(s) par le transitaire';
+  }
+  final unpaid = invoices.where((f) => !f.estAcquittee).toList();
+  if (unpaid.isNotEmpty) {
+    return 'facture(s) transitaire non soldée(s) : ${unpaid.map((f) => f.reference).join(', ')}';
+  }
+  return null;
+}
+
 class FactureTransitairePage extends StatefulWidget {
   final List<TransitDossier> dossiers;
   final List<Prestataire> prestataires;
   final List<JournalCode> journals;
   final List<ModeReglement> modes;
+  final List<FactureTransitaire> factures;
 
   const FactureTransitairePage({
     super.key,
     required this.dossiers,
     required this.prestataires,
     required this.journals,
+    required this.factures,
     this.modes = const [],
   });
 
@@ -36,116 +97,95 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
   Prestataire? _transitaire;
   _PaidFilter _paidFilter = _PaidFilter.all;
   String _query = '';
-  TransitDossier? _selected;
-  DossierOperation? _selectedPayment;
+  FactureTransitaire? _selected;
+  ReglementFacture? _selectedPayment;
 
-  static const _kind = DossierInvoiceKind.forwarder;
+  Prestataire? _partner(String id) =>
+      widget.prestataires.where((p) => p.id == id).firstOrNull;
+  String _partnerName(String id) => _partner(id)?.entreprise ?? '';
+  String _dossierNumber(String id) =>
+      widget.dossiers.where((d) => d.id == id).firstOrNull?.numDossier ?? '';
 
-  DossierInvoice _invoice(TransitDossier d) => d.factureTransitaire;
-  double _paid(TransitDossier d) => d.totalRegleDe(_kind);
-  double _balance(TransitDossier d) => _invoice(d).montant - _paid(d);
-  bool _isPaid(TransitDossier d) => _invoice(d).montant > 0 && _balance(d) <= 0;
-
-  // Dossier affecté à un transitaire mais pas encore facturé par lui.
-  bool _isPending(TransitDossier d) => _invoice(d).statut == 'Brouillon';
-
-  // Factures existantes + dossiers des transitaires encore à facturer.
-  List<TransitDossier> get _rowsSource => widget.dossiers
-      .where(
-        (d) =>
-            !_isPending(d) || (d.transitaireAffecte != null && !d.estCloture),
-      )
-      .toList();
-
-  List<TransitDossier> get _filtered {
+  List<FactureTransitaire> get _filtered {
     final query = _query.trim().toLowerCase();
-    return _rowsSource.where((d) {
-      final date = _parseFrDate(
-        _isPending(d) ? d.dateCreation : _invoice(d).dateEmission,
-      );
-      if (!_inPeriod(date, _from, _to)) return false;
-      if (_transitaire != null &&
-          d.transitaireAffecte?.id != _transitaire!.id) {
+    return widget.factures.where((f) {
+      if (!_inPeriod(_parseFrDate(f.dateEmission), _from, _to)) return false;
+      if (_transitaire != null && f.transitaireId != _transitaire!.id) {
         return false;
       }
-      switch (_paidFilter) {
-        case _PaidFilter.all:
-          break;
-        case _PaidFilter.toInvoice:
-          if (!_isPending(d)) return false;
-        case _PaidFilter.paid:
-          if (_isPending(d) || !_isPaid(d)) return false;
-        case _PaidFilter.unpaid:
-          if (_isPending(d) || _isPaid(d)) return false;
-      }
+      if (_paidFilter == _PaidFilter.paid && !f.estAcquittee) return false;
+      if (_paidFilter == _PaidFilter.unpaid && f.estAcquittee) return false;
       if (query.isEmpty) return true;
-      return _invoiceColumns
-          .map((c) => c.value(d))
-          .join(' ')
-          .toLowerCase()
-          .contains(query);
+      return [
+        ..._invoiceColumns.map((c) => c.value(f)),
+        ...f.lignes.map((l) => '${l.bl} ${l.numeroConteneur} ${l.plaque}'),
+      ].join(' ').toLowerCase().contains(query);
     }).toList();
   }
 
-  late final List<ErpGridColumn<TransitDossier>> _invoiceColumns = [
+  int get _pendingContainers {
+    final transitaires = _transitaire == null
+        ? widget.prestataires.where((p) => p.type == 'Transitaire')
+        : [_transitaire!];
+    return transitaires.fold(
+      0,
+      (sum, t) =>
+          sum +
+          _availableContainers(widget.dossiers, widget.factures, t.id).length,
+    );
+  }
+
+  late final List<ErpGridColumn<FactureTransitaire>> _invoiceColumns = [
     ErpGridColumn(
       label: 'ID',
       width: 70,
       numeric: true,
-      value: (d) => _isPending(d) || _invoice(d).numero == 0
-          ? ''
-          : '${_invoice(d).numero}',
-      sortValue: (d) => _invoice(d).numero,
+      value: (f) => f.numero == 0 ? '' : '${f.numero}',
+      sortValue: (f) => f.numero,
     ),
     ErpGridColumn(
       label: 'Numéro de facture',
-      width: 175,
-      value: (d) => _isPending(d) ? '—' : _invoice(d).reference,
+      width: 170,
+      value: (f) => f.reference,
     ),
     ErpGridColumn(
       label: 'Statut',
       width: 140,
-      value: (d) => _isPending(d)
-          ? 'À facturer'
-          : _isPaid(d)
-          ? 'Acquittée'
-          : 'Non acquittée',
-      builder: (d) => _isPending(d)
-          ? const ErpStatusChip('À facturer', Color(0xFF2563EB))
-          : _isPaid(d)
+      value: (f) => f.estAcquittee ? 'Acquittée' : 'Non acquittée',
+      builder: (f) => f.estAcquittee
           ? const ErpStatusChip('Acquittée', Color(0xFF15803D))
           : const ErpStatusChip('Non acquittée', Color(0xFFEA580C)),
     ),
     ErpGridColumn(
       label: 'Date de facture',
       width: 120,
-      value: (d) => _invoice(d).dateEmission,
-      sortValue: (d) => _parseFrDate(_invoice(d).dateEmission) ?? DateTime(0),
+      value: (f) => f.dateEmission,
+      sortValue: (f) => _parseFrDate(f.dateEmission) ?? DateTime(0),
     ),
     ErpGridColumn(
       label: 'Total TTC',
       width: 135,
       numeric: true,
-      value: (d) => _amountText(_invoice(d).montant),
-      sortValue: (d) => _invoice(d).montant,
+      value: (f) => _amountText(f.montant),
+      sortValue: (f) => f.montant,
     ),
     ErpGridColumn(
       label: 'Total payé',
       width: 135,
       numeric: true,
-      value: (d) => _amountText(_paid(d)),
-      sortValue: (d) => _paid(d),
+      value: (f) => _amountText(f.totalRegle),
+      sortValue: (f) => f.totalRegle,
     ),
     ErpGridColumn(
       label: 'Reliquat',
       width: 135,
       numeric: true,
-      value: (d) => _amountText(_balance(d)),
-      sortValue: (d) => _balance(d),
-      builder: (d) => Text(
-        _amountText(_balance(d)),
+      value: (f) => _amountText(f.reliquat),
+      sortValue: (f) => f.reliquat,
+      builder: (f) => Text(
+        _amountText(f.reliquat),
         style: TextStyle(
-          color: _balance(d) > 0
+          color: f.reliquat > 0
               ? const Color(0xFFDC2626)
               : const Color(0xFF15803D),
           fontWeight: FontWeight.w600,
@@ -155,169 +195,147 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
     ErpGridColumn(
       label: 'Transitaire',
       width: 170,
-      value: (d) => d.nomTransitaire,
+      value: (f) => _partnerName(f.transitaireId),
     ),
-    ErpGridColumn(label: 'Dossier', width: 180, value: (d) => d.numDossier),
-    ErpGridColumn(label: 'Client', width: 180, value: (d) => d.client.nom),
+    ErpGridColumn(
+      label: 'Conteneurs',
+      width: 100,
+      numeric: true,
+      value: (f) => '${f.lignes.length}',
+      sortValue: (f) => f.lignes.length,
+    ),
+    ErpGridColumn(
+      label: 'BL',
+      width: 200,
+      value: (f) => {for (final l in f.lignes) l.bl}.join(', '),
+    ),
     ErpGridColumn(
       label: 'Observations',
       width: 220,
-      value: (d) => _invoice(d).observations,
+      value: (f) => f.observations,
     ),
   ];
 
-  late final List<ErpGridColumn<InvoiceLine>> _lineColumns = [
+  late final List<ErpGridColumn<FactureTransitaireLigne>> _lineColumns = [
+    ErpGridColumn(label: 'BL', width: 130, value: (l) => l.bl),
     ErpGridColumn(
-      label: 'Véhicule',
-      width: 130,
-      value: (l) => l.plaqueVehicule,
+      label: 'Dossier',
+      width: 160,
+      value: (l) => _dossierNumber(l.dossierId),
     ),
     ErpGridColumn(
-      label: 'Tél. chauffeur',
-      width: 140,
-      value: (l) => l.telephoneChauffeur,
+      label: 'Marchandise',
+      width: 150,
+      value: (l) => l.marchandise,
     ),
-    ErpGridColumn(label: 'BL', width: 140, value: (l) => l.bl),
     ErpGridColumn(
-      label: 'Montant total',
-      width: 135,
-      numeric: true,
-      value: (l) => _amountText(l.totalPrestataire),
-      sortValue: (l) => l.totalPrestataire,
+      label: 'Date de départ',
+      width: 115,
+      value: (l) => l.dateDepart,
     ),
     ErpGridColumn(
       label: 'Numéro conteneur',
-      width: 155,
+      width: 150,
       value: (l) => l.numeroConteneur,
     ),
     ErpGridColumn(
       label: 'Type conteneur',
-      width: 125,
+      width: 120,
       value: (l) => l.typeConteneur,
     ),
     ErpGridColumn(
-      label: 'Marchandise',
-      width: 170,
-      value: (l) => l.marchandise,
+      label: 'Transporteur',
+      width: 150,
+      value: (l) => _partnerName(l.transporteurId),
     ),
+    ErpGridColumn(label: 'Véhicule', width: 120, value: (l) => l.plaque),
     ErpGridColumn(
-      label: 'Conteneurs 20 pieds',
-      width: 115,
-      numeric: true,
-      value: (l) => l.typeConteneur.startsWith('20') ? '1' : '0',
-    ),
-    ErpGridColumn(
-      label: 'Conteneurs 40 pieds',
-      width: 115,
-      numeric: true,
-      value: (l) => l.typeConteneur.startsWith('40') ? '1' : '0',
-    ),
-    ErpGridColumn(
-      label: 'Frais de transit',
+      label: 'Tél. chauffeur',
       width: 130,
-      numeric: true,
-      value: (l) => _amountText(l.fraisTransit),
-      sortValue: (l) => l.fraisTransit,
+      value: (l) => l.telephoneChauffeur,
     ),
-    ErpGridColumn(
-      label: 'Surestaries et magasinage',
-      width: 170,
-      numeric: true,
-      value: (l) => _amountText(l.surestariesMagasinage),
-      sortValue: (l) => l.surestariesMagasinage,
-    ),
-    ErpGridColumn(
-      label: 'Volume et poids',
-      width: 130,
-      numeric: true,
-      value: (l) => _amountText(l.volumePoids),
-      sortValue: (l) => l.volumePoids,
-    ),
-    ErpGridColumn(
-      label: 'Frais de péage',
-      width: 125,
-      numeric: true,
-      value: (l) => _amountText(l.fraisPeage),
-      sortValue: (l) => l.fraisPeage,
-    ),
-    ErpGridColumn(
-      label: 'Autres frais',
-      width: 125,
-      numeric: true,
-      value: (l) => _amountText(l.autresFrais),
-      sortValue: (l) => l.autresFrais,
-    ),
+    for (final (label, pick)
+        in <(String, double Function(FactureTransitaireLigne))>[
+          ('Frais de transit', (l) => l.fraisTransit),
+          ('Surestaries et magasinage', (l) => l.surestariesMagasinage),
+          ('Volume et poids', (l) => l.volumePoids),
+          ('Autres frais', (l) => l.autresFrais),
+          ('Frais de péage', (l) => l.fraisPeage),
+          ('Montant', (l) => l.montant),
+          ('Transport dû', (l) => l.montantTransport),
+          ('Avance camion', (l) => l.avanceCamion),
+        ])
+      ErpGridColumn(
+        label: label,
+        width: label.length > 14 ? 170 : 130,
+        numeric: true,
+        value: (l) => _amountText(pick(l)),
+        sortValue: (l) => pick(l),
+      ),
   ];
 
-  late final List<ErpGridColumn<DossierOperation>> _paymentColumns = [
+  late final List<ErpGridColumn<ReglementFacture>> _paymentColumns = [
     ErpGridColumn(
       label: 'Date règlement',
       width: 125,
-      value: (op) => op.date.split(' ').first,
-      sortValue: (op) => _parseFrDate(op.date) ?? DateTime(0),
+      value: (r) => r.date.split(' ').first,
+      sortValue: (r) => _parseFrDate(r.date) ?? DateTime(0),
     ),
     ErpGridColumn(
       label: 'Montant',
       width: 135,
       numeric: true,
-      value: (op) => _amountText(op.montant),
-      sortValue: (op) => op.montant,
+      value: (r) => _amountText(r.montant),
+      sortValue: (r) => r.montant,
     ),
-    ErpGridColumn(label: 'Caisse', width: 150, value: _journalLabel),
+    ErpGridColumn(
+      label: 'Caisse',
+      width: 160,
+      value: (r) => _journalLabel(r.codeJournal),
+    ),
     ErpGridColumn(
       label: 'Mode de paiement',
       width: 150,
-      value: (op) => op.modePaiement,
+      value: (r) => r.modePaiement,
     ),
     ErpGridColumn(
       label: 'Numéro de chèque',
       width: 140,
-      value: (op) => op.numeroCheque,
+      value: (r) => r.numeroCheque,
     ),
     ErpGridColumn(
       label: 'Observations',
       width: 230,
-      value: (op) => op.observations,
+      value: (r) => r.observations,
     ),
-    ErpGridColumn(label: 'Auteur saisie', width: 150, value: (op) => op.auteur),
+    ErpGridColumn(label: 'Auteur saisie', width: 150, value: (r) => r.auteur),
     ErpGridColumn(
       label: 'Date saisie',
       width: 110,
-      value: (op) => op.saisiLe.split(' ').first,
+      value: (r) => r.saisiLe.split(' ').first,
     ),
     ErpGridColumn(
       label: 'Heure saisie',
       width: 100,
-      value: (op) => op.saisiLe.contains(' ') ? op.saisiLe.split(' ').last : '',
+      value: (r) => r.saisiLe.contains(' ') ? r.saisiLe.split(' ').last : '',
     ),
   ];
 
-  String _journalLabel(DossierOperation op) {
-    final journal = widget.journals
-        .where((j) => j.code == op.codeJournal)
-        .firstOrNull;
-    return journal == null
-        ? op.codeJournal
-        : '${journal.code} • ${journal.intitule}';
+  String _journalLabel(String code) {
+    final journal = widget.journals.where((j) => j.code == code).firstOrNull;
+    return journal == null ? code : '${journal.code} • ${journal.intitule}';
   }
 
   @override
   Widget build(BuildContext context) {
     final rows = _filtered;
-    final selected = rows.any((d) => d.id == _selected?.id) ? _selected : null;
-    final payments = selected == null
-        ? <DossierOperation>[]
-        : selected.reglementsDe(_kind).toList();
+    final selected = rows.any((f) => f.id == _selected?.id) ? _selected : null;
+    final payments = selected?.reglements ?? const <ReglementFacture>[];
     final selectedPayment = payments.any((p) => p.id == _selectedPayment?.id)
         ? _selectedPayment
         : null;
-    final invoicedRows = rows.where((d) => !_isPending(d));
-    final total = invoicedRows.fold<double>(
-      0,
-      (sum, d) => sum + _invoice(d).montant,
-    );
-    final paid = invoicedRows.fold<double>(0, (sum, d) => sum + _paid(d));
-    final pendingCount = rows.where(_isPending).length;
+    final total = rows.fold<double>(0, (s, f) => s + f.montant);
+    final paid = rows.fold<double>(0, (s, f) => s + f.totalRegle);
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6FB),
       body: LayoutBuilder(
@@ -326,55 +344,35 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
           final invoiceGrid = _section(
             title: 'Factures transitaire',
             icon: Icons.directions_boat_rounded,
-            child: ErpGrid<TransitDossier>(
+            child: ErpGrid<FactureTransitaire>(
               key: const ValueKey('transitaire-invoices-grid'),
               columns: _invoiceColumns,
               rows: rows,
-              rowId: (d) => d.id,
+              rowId: (f) => f.id,
               selected: selected,
-              onSelect: (d) => setState(() {
-                _selected = d;
+              onSelect: (f) => setState(() {
+                _selected = f;
                 _selectedPayment = null;
               }),
               onOpen: _edit,
               emptyIcon: Icons.receipt_long_outlined,
-              emptyText: _rowsSource.isEmpty
-                  ? 'Aucun dossier affecté à un transitaire pour le moment.'
+              emptyText: widget.factures.isEmpty
+                  ? 'Aucune facture transitaire. Cliquez sur « Nouvelle facture ».'
                   : 'Aucune facture ne correspond aux filtres.',
             ),
           );
           final details = _section(
             title: selected == null
                 ? 'Détails de la facture'
-                : _isPending(selected)
-                ? 'Conteneurs à facturer • ${selected.numDossier}'
-                : 'Détails de la facture ${_invoice(selected).reference}',
+                : 'Détails de la facture ${selected.reference}',
             icon: Icons.local_shipping_rounded,
-            child: ErpGrid<InvoiceLine>(
+            child: ErpGrid<FactureTransitaireLigne>(
               key: const ValueKey('transitaire-lines-grid'),
               columns: _lineColumns,
-              rows: selected == null
-                  ? const []
-                  : _isPending(selected)
-                  ? [
-                      for (final c in selected.conteneurs)
-                        InvoiceLine(
-                          description: 'Conteneur ${c.numero}',
-                          quantite: 1,
-                          prixUnitaire: 0,
-                          numeroConteneur: c.numero,
-                          typeConteneur: c.type,
-                          marchandise: c.marchandise,
-                          bl: selected.numBL,
-                        ),
-                    ]
-                  : _invoice(selected).lignes,
-              rowId: (l) =>
-                  '${l.numeroConteneur}-${l.plaqueVehicule}-${l.hashCode}',
+              rows: selected?.lignes ?? const [],
+              rowId: (l) => l.cleConteneur,
               emptyIcon: Icons.touch_app_outlined,
-              emptyText: selected == null
-                  ? 'Sélectionnez une facture pour voir ses détails.'
-                  : 'Cette facture ne contient aucune ligne.',
+              emptyText: 'Sélectionnez une facture pour voir ses conteneurs.',
             ),
           );
           final paymentsPanel = _section(
@@ -401,29 +399,31 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
                     : () => _deletePayment(selected, selectedPayment),
               ),
             ],
-            child: ErpGrid<DossierOperation>(
+            child: ErpGrid<ReglementFacture>(
               key: const ValueKey('transitaire-payments-grid'),
               columns: _paymentColumns,
               rows: payments,
-              rowId: (op) => op.id,
+              rowId: (r) => r.id,
               selected: selectedPayment,
-              onSelect: (op) => setState(() => _selectedPayment = op),
+              onSelect: (r) => setState(() => _selectedPayment = r),
               emptyIcon: Icons.account_balance_wallet_outlined,
               emptyText: selected == null
                   ? 'Sélectionnez une facture pour voir ses règlements.'
                   : 'Aucun règlement pour cette facture.',
             ),
           );
+          final header = [
+            _buildToolbar(selected, total, paid),
+            const SizedBox(height: 12),
+            _buildFilters(rows.length),
+            const SizedBox(height: 12),
+          ];
           return Padding(
             padding: EdgeInsets.all(wide ? 18 : 10),
             child: wide
-                // Les grilles gardent une hauteur confortable ; sur un petit écran la page défile.
                 ? ListView(
                     children: [
-                      _buildToolbar(selected, total, paid),
-                      const SizedBox(height: 12),
-                      _buildFilters(rows.length, pendingCount),
-                      const SizedBox(height: 12),
+                      ...header,
                       SizedBox(
                         height: math.max(660, constraints.maxHeight - 360),
                         child: Row(
@@ -448,10 +448,7 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
                   )
                 : ListView(
                     children: [
-                      _buildToolbar(selected, total, paid),
-                      const SizedBox(height: 12),
-                      _buildFilters(rows.length, pendingCount),
-                      const SizedBox(height: 12),
+                      ...header,
                       SizedBox(height: 380, child: invoiceGrid),
                       const SizedBox(height: 12),
                       SizedBox(height: 320, child: details),
@@ -519,7 +516,11 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
     child: child,
   );
 
-  Widget _buildToolbar(TransitDossier? selected, double total, double paid) {
+  Widget _buildToolbar(
+    FactureTransitaire? selected,
+    double total,
+    double paid,
+  ) {
     final hasSelection = selected != null;
     return _card(
       Column(
@@ -588,7 +589,7 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
                 label: 'Nouvelle facture',
                 icon: Icons.note_add_rounded,
                 primary: true,
-                onPressed: _create,
+                onPressed: () => _openEditor(null),
               ),
               ErpActionButton(
                 key: const ValueKey('transitaire-invoice-edit'),
@@ -617,9 +618,11 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
                 label: 'Imprimer',
                 icon: Icons.print_outlined,
                 onPressed: hasSelection
-                    ? () => _printTransitaireInvoice(
+                    ? () => _printFactureTransitaire(
                         selected,
-                        PdfPageFormat.a4.landscape,
+                        transitaire: _partnerName(selected.transitaireId),
+                        dossierNumber: _dossierNumber,
+                        partnerName: _partnerName,
                       )
                     : null,
               ),
@@ -630,7 +633,7 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
     );
   }
 
-  Widget _buildFilters(int count, int pending) => _card(
+  Widget _buildFilters(int count) => _card(
     Wrap(
       spacing: 12,
       runSpacing: 12,
@@ -665,10 +668,6 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
           showSelectedIcon: false,
           segments: const [
             ButtonSegment(value: _PaidFilter.all, label: Text('Toutes')),
-            ButtonSegment(
-              value: _PaidFilter.toInvoice,
-              label: Text('À facturer'),
-            ),
             ButtonSegment(value: _PaidFilter.paid, label: Text('Acquittées')),
             ButtonSegment(
               value: _PaidFilter.unpaid,
@@ -684,7 +683,7 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
           child: TextField(
             onChanged: (value) => setState(() => _query = value),
             decoration: InputDecoration(
-              hintText: 'Rechercher une facture…',
+              hintText: 'Facture, BL, conteneur, plaque…',
               isDense: true,
               prefixIcon: const Icon(Icons.search_rounded),
               border: OutlineInputBorder(
@@ -700,7 +699,8 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
             borderRadius: BorderRadius.circular(20),
           ),
           child: Text(
-            '$count ligne(s) • $pending à facturer',
+            '$count facture(s) • $_pendingContainers conteneur(s) à facturer',
+            key: const ValueKey('transitaire-count'),
             style: const TextStyle(
               color: Color(0xFFC2410C),
               fontWeight: FontWeight.w600,
@@ -711,46 +711,8 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
     ),
   );
 
-  Future<void> _create() async {
-    final selected = _selected;
-    if (selected != null &&
-        _isPending(selected) &&
-        _filtered.any((d) => d.id == selected.id)) {
-      await _openEditor(selected);
-      return;
-    }
-    final candidates = widget.dossiers
-        .where(
-          (d) =>
-              !d.estCloture &&
-              _invoice(d).statut == 'Brouillon' &&
-              (_transitaire == null ||
-                  d.transitaireAffecte?.id == _transitaire!.id),
-        )
-        .toList();
-    if (candidates.isEmpty) {
-      await _showInfoAlert(
-        context,
-        title: 'Aucun dossier à facturer',
-        message:
-            'Tous les dossiers ouverts ont déjà une facture transitaire, ou aucun dossier n’existe encore.',
-      );
-      return;
-    }
-    final dossier = await showDialog<TransitDossier>(
-      context: context,
-      builder: (context) => _DossierPickerDialog(dossiers: candidates),
-    );
-    if (dossier == null || !mounted) return;
-    await _openEditor(dossier);
-  }
-
-  Future<void> _edit(TransitDossier dossier) async {
-    if (_isPending(dossier)) {
-      if (!dossier.estCloture) await _openEditor(dossier);
-      return;
-    }
-    if (_paid(dossier) > 0) {
+  Future<void> _edit(FactureTransitaire facture) async {
+    if (facture.reglements.isNotEmpty) {
       await _showInfoAlert(
         context,
         title: 'Facture déjà réglée',
@@ -759,59 +721,50 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
       );
       return;
     }
-    if (dossier.estCloture) {
-      await _showInfoAlert(
-        context,
-        title: 'Dossier clôturé',
-        message: 'Le dossier de cette facture est clôturé.',
-      );
-      return;
-    }
-    await _openEditor(dossier);
+    await _openEditor(facture);
   }
 
-  Future<void> _openEditor(TransitDossier dossier) async {
-    final saved = await showDialog<bool>(
+  Future<void> _openEditor(FactureTransitaire? facture) async {
+    final saved = await showDialog<FactureTransitaire>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => _TransitaireInvoiceDialog(
-        dossier: dossier,
+      builder: (context) => _FactureTransitaireEditor(
+        initial: facture,
         dossiers: widget.dossiers,
-        transitaires: widget.prestataires
-            .where((p) => p.type == 'Transitaire')
-            .toList(),
+        prestataires: widget.prestataires,
+        factures: widget.factures,
+        transitaire: facture == null ? _transitaire : null,
       ),
     );
-    if (saved == true && mounted) setState(() => _selected = dossier);
+    if (saved == null || !mounted) return;
+    setState(() {
+      final index = widget.factures.indexWhere((f) => f.id == saved.id);
+      if (index < 0) {
+        widget.factures.add(saved);
+      } else {
+        widget.factures[index] = saved;
+      }
+      _selected = saved;
+    });
   }
 
-  Future<void> _delete(TransitDossier dossier) async {
-    if (_isPending(dossier)) {
-      await _showInfoAlert(
-        context,
-        title: 'Aucune facture',
-        message: 'Ce dossier n’a pas encore de facture transitaire.',
-      );
-      return;
-    }
-    if (_paid(dossier) > 0 || dossier.estCloture) {
+  Future<void> _delete(FactureTransitaire facture) async {
+    if (facture.reglements.isNotEmpty) {
       await _showInfoAlert(
         context,
         title: 'Suppression impossible',
-        message: dossier.estCloture
-            ? 'Le dossier de cette facture est clôturé.'
-            : 'Cette facture a déjà des règlements. Supprimez d’abord les règlements.',
+        message:
+            'Cette facture a déjà des règlements. Supprimez d’abord les règlements.',
       );
       return;
     }
-    final invoice = _invoice(dossier);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         icon: const Icon(Icons.delete_forever_rounded, color: Colors.red),
         title: const Text('Supprimer cette facture ?'),
         content: Text(
-          'La facture ${invoice.reference} (${_amountText(invoice.montant)}) du dossier ${dossier.numDossier} sera supprimée.',
+          'La facture ${facture.reference} (${_amountText(facture.montant)}) sera supprimée. Ses ${facture.lignes.length} conteneur(s) redeviendront disponibles.',
         ),
         actions: [
           TextButton(
@@ -827,55 +780,21 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    final previous = (
-      invoice.reference,
-      invoice.lignes,
-      invoice.montant,
-      invoice.statut,
-      invoice.dateEmission,
-      invoice.observations,
-      invoice.description,
-    );
-    invoice
-      ..reference = 'FT-${dossier.numDossier}'
-      ..lignes = []
-      ..montant = 0
-      ..statut = 'Brouillon'
-      ..dateEmission = ''
-      ..observations = ''
-      ..description = '';
-    if (!await _persist(context, () => erpBackend.saveDossier(dossier))) {
-      invoice
-        ..reference = previous.$1
-        ..lignes = previous.$2
-        ..montant = previous.$3
-        ..statut = previous.$4
-        ..dateEmission = previous.$5
-        ..observations = previous.$6
-        ..description = previous.$7;
+    if (!await _persist(
+      context,
+      () => erpBackend.deleteFactureTransitaire(facture),
+    )) {
+      return;
     }
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {
+      widget.factures.removeWhere((f) => f.id == facture.id);
+      _selected = null;
+    });
   }
 
-  Future<void> _addPayment(TransitDossier dossier) async {
-    if (_isPending(dossier)) {
-      await _showInfoAlert(
-        context,
-        title: 'Facture à créer',
-        message:
-            'Créez d’abord la facture de ce dossier avec « Nouvelle facture ».',
-      );
-      return;
-    }
-    if (dossier.estCloture) {
-      await _showInfoAlert(
-        context,
-        title: 'Dossier clôturé',
-        message: 'Aucun règlement ne peut être ajouté à un dossier clôturé.',
-      );
-      return;
-    }
-    if (_balance(dossier) <= 0) {
+  Future<void> _addPayment(FactureTransitaire facture) async {
+    if (facture.reliquat <= 0) {
       await _showInfoAlert(
         context,
         title: 'Facture acquittée',
@@ -892,26 +811,39 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
       );
       return;
     }
-    final payment = await showDialog<DossierOperation>(
+    final operation = await showDialog<DossierOperation>(
       context: context,
       builder: (context) => _PaymentDialog(
         journals: widget.journals,
         modes: widget.modes,
-        balance: _balance(dossier),
-        invoiceReference: _invoice(dossier).reference,
+        balance: facture.reliquat,
+        invoiceReference: facture.reference,
       ),
     );
-    if (payment == null || !mounted) return;
-    dossier.operations.add(payment);
-    if (!await _persist(context, () => erpBackend.saveDossier(dossier))) {
-      dossier.operations.remove(payment);
+    if (operation == null || !mounted) return;
+    final payment = ReglementFacture(
+      date: operation.date,
+      montant: operation.montant,
+      codeJournal: operation.codeJournal,
+      modePaiement: operation.modePaiement,
+      numeroCheque: operation.numeroCheque,
+      observations: operation.observations,
+      auteur: operation.auteur,
+      saisiLe: operation.saisiLe,
+    );
+    facture.reglements.add(payment);
+    if (!await _persist(
+      context,
+      () => erpBackend.saveFactureTransitaire(facture),
+    )) {
+      facture.reglements.remove(payment);
     }
     if (mounted) setState(() => _selectedPayment = null);
   }
 
   Future<void> _deletePayment(
-    TransitDossier dossier,
-    DossierOperation payment,
+    FactureTransitaire facture,
+    ReglementFacture payment,
   ) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -934,227 +866,601 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    final index = dossier.operations.indexOf(payment);
-    dossier.operations.removeAt(index);
-    if (!await _persist(context, () => erpBackend.saveDossier(dossier))) {
-      dossier.operations.insert(index, payment);
+    final index = facture.reglements.indexOf(payment);
+    facture.reglements.removeAt(index);
+    if (!await _persist(
+      context,
+      () => erpBackend.saveFactureTransitaire(facture),
+    )) {
+      facture.reglements.insert(index, payment);
     }
     if (mounted) setState(() => _selectedPayment = null);
   }
 }
 
-// Choix du dossier à facturer.
-class _DossierPickerDialog extends StatefulWidget {
-  final List<TransitDossier> dossiers;
-
-  const _DossierPickerDialog({required this.dossiers});
-
-  @override
-  State<_DossierPickerDialog> createState() => _DossierPickerDialogState();
-}
-
-class _DossierPickerDialogState extends State<_DossierPickerDialog> {
-  TransitDossier? _dossier;
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Nouvelle facture transitaire'),
-    content: SizedBox(
-      width: 460,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Choisissez le dossier à facturer. La facture reprendra ses conteneurs.',
-            style: TextStyle(color: _gridMuted),
-          ),
-          const SizedBox(height: 14),
-          SearchableDropdownFormField<TransitDossier>(
-            key: const ValueKey('transitaire-dossier-picker'),
-            options: widget.dossiers,
-            value: _dossier,
-            label: 'Dossier',
-            emptyText: 'Aucun dossier',
-            displayString: (d) =>
-                '${d.numDossier} • ${d.client.nom}${d.nomTransitaire.isEmpty ? '' : ' • ${d.nomTransitaire}'}',
-            onChanged: (d) => setState(() => _dossier = d),
-          ),
-        ],
-      ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Annuler'),
-      ),
-      FilledButton(
-        onPressed: _dossier == null
-            ? null
-            : () => Navigator.pop(context, _dossier),
-        child: const Text('Continuer'),
-      ),
-    ],
-  );
-}
-
 class _TransitLineDraft {
-  final plate = TextEditingController();
-  final driverPhone = TextEditingController();
-  final bl = TextEditingController();
-  final container = TextEditingController();
-  final containerType = TextEditingController();
-  final cargo = TextEditingController();
+  final String dossierId;
+  final String bl;
+  final String numeroConteneur;
+  final String marchandise;
+  final String typeConteneur;
+  final String transporteurId;
+  final dateDepart = TextEditingController();
+  final plaque = TextEditingController();
+  final telephone = TextEditingController();
   final transit = TextEditingController();
-  final volume = TextEditingController();
   final demurrage = TextEditingController();
-  final toll = TextEditingController();
+  final volume = TextEditingController();
   final other = TextEditingController();
+  final toll = TextEditingController();
+  final transport = TextEditingController();
+  final advance = TextEditingController();
 
-  _TransitLineDraft({InvoiceLine? line, TransitContainer? from, String? bl}) {
-    if (line != null) {
-      plate.text = line.plaqueVehicule;
-      driverPhone.text = line.telephoneChauffeur;
-      this.bl.text = line.bl;
-      container.text = line.numeroConteneur;
-      containerType.text = line.typeConteneur;
-      cargo.text = line.marchandise;
-      transit.text = _draft(line.fraisTransit);
-      volume.text = _draft(line.volumePoids);
-      demurrage.text = _draft(line.surestariesMagasinage);
-      toll.text = _draft(line.fraisPeage);
-      other.text = _draft(line.autresFrais);
-      return;
-    }
-    this.bl.text = bl ?? '';
-    if (from != null) {
-      container.text = from.numero;
-      containerType.text = from.type;
-      cargo.text = from.marchandise;
-    }
+  _TransitLineDraft(FactureTransitaireLigne l)
+    : dossierId = l.dossierId,
+      bl = l.bl,
+      numeroConteneur = l.numeroConteneur,
+      marchandise = l.marchandise,
+      typeConteneur = l.typeConteneur,
+      transporteurId = l.transporteurId {
+    dateDepart.text = l.dateDepart;
+    plaque.text = l.plaque;
+    telephone.text = l.telephoneChauffeur;
+    transit.text = _draft(l.fraisTransit);
+    demurrage.text = _draft(l.surestariesMagasinage);
+    volume.text = _draft(l.volumePoids);
+    other.text = _draft(l.autresFrais);
+    toll.text = _draft(l.fraisPeage);
+    transport.text = _draft(l.montantTransport);
+    advance.text = _draft(l.avanceCamion);
   }
 
   static String _draft(double value) =>
       value == 0 ? '' : value.toStringAsFixed(0);
 
-  List<TextEditingController> get amounts => [
-    transit,
-    volume,
-    demurrage,
-    toll,
-    other,
-  ];
+  String get cle => '$dossierId|${numeroConteneur.toUpperCase()}';
 
-  double get total =>
-      amounts.fold(0, (sum, c) => sum + (_parseAmount(c.text) ?? 0));
+  List<TextEditingController> get fees => [
+    transit,
+    demurrage,
+    volume,
+    other,
+    toll,
+  ];
+  List<TextEditingController> get amounts => [...fees, transport, advance];
+
+  double get montant => fees.fold(0, (s, c) => s + (_parseAmount(c.text) ?? 0));
+  double get montantTransport => _parseAmount(transport.text) ?? 0;
+  double get avanceCamion => _parseAmount(advance.text) ?? 0;
 
   bool get hasInvalidAmount => amounts.any((c) {
     final value = _parseAmount(c.text);
     return value == null || value < 0;
   });
 
-  InvoiceLine toLine() => InvoiceLine(
-    description: 'Transit ${container.text.trim()}'.trim(),
-    quantite: 1,
-    prixUnitaire: total,
-    plaqueVehicule: plate.text.trim().toUpperCase(),
-    telephoneChauffeur: driverPhone.text.trim(),
-    bl: bl.text.trim(),
-    numeroConteneur: container.text.trim().toUpperCase(),
-    typeConteneur: containerType.text.trim(),
-    marchandise: cargo.text.trim(),
+  FactureTransitaireLigne toLine() => FactureTransitaireLigne(
+    dossierId: dossierId,
+    bl: bl,
+    numeroConteneur: numeroConteneur,
+    marchandise: marchandise,
+    typeConteneur: typeConteneur,
+    dateDepart: dateDepart.text.trim(),
+    transporteurId: transporteurId,
+    plaque: plaque.text.trim().toUpperCase(),
+    telephoneChauffeur: telephone.text.trim(),
     fraisTransit: _parseAmount(transit.text) ?? 0,
-    volumePoids: _parseAmount(volume.text) ?? 0,
     surestariesMagasinage: _parseAmount(demurrage.text) ?? 0,
-    fraisPeage: _parseAmount(toll.text) ?? 0,
+    volumePoids: _parseAmount(volume.text) ?? 0,
     autresFrais: _parseAmount(other.text) ?? 0,
+    fraisPeage: _parseAmount(toll.text) ?? 0,
+    montantTransport: montantTransport,
+    avanceCamion: avanceCamion,
   );
 
   void dispose() {
-    for (final c in [
-      plate,
-      driverPhone,
-      bl,
-      container,
-      containerType,
-      cargo,
-      ...amounts,
-    ]) {
+    for (final c in [dateDepart, plaque, telephone, ...amounts]) {
       c.dispose();
     }
   }
 }
 
-// Saisie ou modification d'une facture transitaire.
-class _TransitaireInvoiceDialog extends StatefulWidget {
-  final TransitDossier dossier;
+// Saisie d'une facture transitaire : camion en en-tête, BL disponibles, détail.
+class _FactureTransitaireEditor extends StatefulWidget {
+  final FactureTransitaire? initial;
   final List<TransitDossier> dossiers;
-  final List<Prestataire> transitaires;
+  final List<Prestataire> prestataires;
+  final List<FactureTransitaire> factures;
+  final Prestataire? transitaire;
 
-  const _TransitaireInvoiceDialog({
-    required this.dossier,
+  const _FactureTransitaireEditor({
+    required this.initial,
     required this.dossiers,
-    required this.transitaires,
+    required this.prestataires,
+    required this.factures,
+    this.transitaire,
   });
 
   @override
-  State<_TransitaireInvoiceDialog> createState() =>
-      _TransitaireInvoiceDialogState();
+  State<_FactureTransitaireEditor> createState() =>
+      _FactureTransitaireEditorState();
 }
 
-class _TransitaireInvoiceDialogState extends State<_TransitaireInvoiceDialog> {
+class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _reference = TextEditingController();
   final _observations = TextEditingController();
+  final _plateText = TextEditingController();
+  final _driverPhone = TextEditingController();
+  final _search = TextEditingController();
+  late final TabController _tabs = TabController(length: 2, vsync: this);
   final List<_TransitLineDraft> _lines = [];
   Prestataire? _transitaire;
+  Prestataire? _transporteur;
+  Vehicule? _vehicule;
   DateTime _date = DateTime.now();
+  _AvailableContainer? _selectedAvailable;
   bool _saving = false;
 
-  TransitDossier get _dossier => widget.dossier;
-  DossierInvoice get _invoice => _dossier.factureTransitaire;
-  bool get _isEdit => _invoice.statut != 'Brouillon';
+  List<Prestataire> get _transitaires =>
+      widget.prestataires.where((p) => p.type == 'Transitaire').toList();
+  List<Prestataire> get _transporteurs =>
+      widget.prestataires.where((p) => p.type == 'Transporteur').toList();
+  bool get _isEdit => widget.initial != null;
 
   @override
   void initState() {
     super.initState();
-    _transitaire = _dossier.transitaireAffecte;
-    if (_isEdit) {
-      _reference.text = _invoice.reference;
-      _observations.text = _invoice.observations;
-      _date = _parseFrDate(_invoice.dateEmission) ?? DateTime.now();
-      _lines.addAll(_invoice.lignes.map((l) => _TransitLineDraft(line: l)));
-    } else {
+    final f = widget.initial;
+    if (f == null) {
+      _transitaire = widget.transitaire;
       _reference.text = _nextInvoiceNumber(
         'FAC-TRS',
-        widget.dossiers.map((d) => d.factureTransitaire.reference),
+        widget.factures.map((x) => x.reference),
         _date,
       );
-      _lines.addAll(
-        _dossier.conteneurs.map(
-          (c) => _TransitLineDraft(from: c, bl: _dossier.numBL),
-        ),
-      );
+      return;
     }
-    if (_lines.isEmpty) _lines.add(_TransitLineDraft(bl: _dossier.numBL));
+    _transitaire = widget.prestataires
+        .where((p) => p.id == f.transitaireId)
+        .firstOrNull;
+    _reference.text = f.reference;
+    _observations.text = f.observations;
+    _date = _parseFrDate(f.dateEmission) ?? DateTime.now();
+    _lines.addAll(f.lignes.map(_TransitLineDraft.new));
+    // Le dernier camion utilisé est repris comme camion courant.
+    final last = f.lignes.lastOrNull;
+    if (last != null) {
+      _transporteur = widget.prestataires
+          .where((p) => p.id == last.transporteurId)
+          .firstOrNull;
+      _vehicule = _transporteur?.vehicules
+          .where(
+            (v) => _normalizePlate(v.plaque) == _normalizePlate(last.plaque),
+          )
+          .firstOrNull;
+      _plateText.text = last.plaque;
+      _driverPhone.text = last.telephoneChauffeur;
+    }
   }
 
   @override
   void dispose() {
-    _reference.dispose();
-    _observations.dispose();
+    for (final c in [
+      _reference,
+      _observations,
+      _plateText,
+      _driverPhone,
+      _search,
+    ]) {
+      c.dispose();
+    }
+    _tabs.dispose();
     for (final line in _lines) {
       line.dispose();
     }
     super.dispose();
   }
 
-  double get _total => _lines.fold(0, (sum, l) => sum + l.total);
+  String get _currentPlate => (_vehicule?.plaque ?? _plateText.text).trim();
+
+  List<_AvailableContainer> get _available {
+    final transitaire = _transitaire;
+    if (transitaire == null) return const [];
+    final inInvoice = _lines.map((l) => l.cle).toSet();
+    final query = _search.text.trim().toLowerCase();
+    return _availableContainers(
+      widget.dossiers,
+      widget.factures,
+      transitaire.id,
+      exceptFactureId: widget.initial?.id,
+    ).where((a) {
+      if (inInvoice.contains(a.cle)) return false;
+      if (query.isEmpty) return true;
+      return '${a.dossier.numBL} ${a.container.numero} ${a.dossier.numDossier} ${a.dossier.client.nom} ${a.container.marchandise}'
+          .toLowerCase()
+          .contains(query);
+    }).toList();
+  }
+
+  double get _total => _lines.fold(0, (s, l) => s + l.montant);
+  double get _truckTransport => _lines
+      .where(
+        (l) => _normalizePlate(l.plaque.text) == _normalizePlate(_currentPlate),
+      )
+      .fold(0, (s, l) => s + l.montantTransport);
+  double get _truckAdvance => _lines
+      .where(
+        (l) => _normalizePlate(l.plaque.text) == _normalizePlate(_currentPlate),
+      )
+      .fold(0, (s, l) => s + l.avanceCamion);
+
+  static final _availableColumns = <ErpGridColumn<_AvailableContainer>>[
+    ErpGridColumn(
+      label: 'BL disponible',
+      width: 150,
+      value: (a) => a.dossier.numBL,
+    ),
+    ErpGridColumn(
+      label: 'Numéro conteneur',
+      width: 160,
+      value: (a) => a.container.numero,
+    ),
+    ErpGridColumn(label: 'Type', width: 110, value: (a) => a.container.type),
+    ErpGridColumn(
+      label: 'Marchandise',
+      width: 160,
+      value: (a) => a.container.marchandise.isEmpty
+          ? a.dossier.typeMarchandise
+          : a.container.marchandise,
+    ),
+    ErpGridColumn(
+      label: 'Dossier',
+      width: 170,
+      value: (a) => a.dossier.numDossier,
+    ),
+    ErpGridColumn(
+      label: 'Client',
+      width: 190,
+      value: (a) => a.dossier.client.nom,
+    ),
+  ];
+
+  void _add(Iterable<_AvailableContainer> containers) {
+    final phone = _driverPhone.text.trim();
+    setState(() {
+      for (final a in containers) {
+        _lines.add(
+          _TransitLineDraft(
+            FactureTransitaireLigne(
+              dossierId: a.dossier.id,
+              bl: a.dossier.numBL,
+              numeroConteneur: a.container.numero.toUpperCase(),
+              marchandise: a.container.marchandise.isEmpty
+                  ? a.dossier.typeMarchandise
+                  : a.container.marchandise,
+              typeConteneur: a.container.type,
+              dateDepart: DateFormat('dd/MM/yyyy').format(DateTime.now()),
+              transporteurId: _transporteur?.id ?? '',
+              plaque: _currentPlate.toUpperCase(),
+              telephoneChauffeur: phone,
+            ),
+          ),
+        );
+      }
+      _selectedAvailable = null;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final screen = MediaQuery.sizeOf(context);
-    final d = _dossier;
+    final available = _available;
+    return Dialog(
+      insetPadding: const EdgeInsets.all(12),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: SizedBox(
+        width: math.min(screen.width - 24, 1400),
+        height: math.min(screen.height - 24, 940),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            children: [
+              _dialogHeader(
+                icon: Icons.directions_boat_rounded,
+                title: _isEdit
+                    ? 'Modifier la facture transitaire'
+                    : 'Nouvelle facture transitaire',
+                subtitle:
+                    _transitaire?.entreprise ??
+                    'Choisissez le transitaire puis ajoutez ses BL disponibles',
+                onClose: () => Navigator.pop(context),
+              ),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: screen.height * 0.42),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+                  child: _buildHeaderFields(),
+                ),
+              ),
+              Material(
+                color: Colors.white,
+                child: TabBar(
+                  controller: _tabs,
+                  labelColor: _gridPrimary,
+                  indicatorColor: _gridAccent,
+                  tabs: [
+                    Tab(
+                      key: const ValueKey('tab-available'),
+                      text: '1. Liste des BL disponibles (${available.length})',
+                    ),
+                    Tab(
+                      key: const ValueKey('tab-details'),
+                      text: '2. Détail de la facture (${_lines.length})',
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Container(
+                  color: const Color(0xFFF4F6FB),
+                  padding: const EdgeInsets.all(12),
+                  child: TabBarView(
+                    controller: _tabs,
+                    children: [
+                      _buildAvailableTab(available),
+                      _buildDetailsTab(),
+                    ],
+                  ),
+                ),
+              ),
+              _dialogFooter(
+                onCancel: () => Navigator.pop(context),
+                onValidate: _saving ? null : _save,
+                validateLabel: 'Valider la facture',
+                validateKey: const ValueKey('transitaire-invoice-validate'),
+                leading: Row(
+                  children: [
+                    const Text(
+                      'Total TTC : ',
+                      style: TextStyle(color: _gridMuted, fontSize: 15),
+                    ),
+                    Flexible(
+                      child: Text(
+                        '${formatCurrency(_total)} FCFA',
+                        key: const ValueKey('transitaire-invoice-total'),
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _gridPrimary,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeaderFields() {
+    final vehicles = _transporteur?.vehicules ?? const <Vehicule>[];
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      children: [
+        SizedBox(
+          width: 260,
+          child: AbsorbPointer(
+            absorbing: _lines.isNotEmpty,
+            child: SearchableDropdownFormField<Prestataire>(
+              key: ValueKey('transitaire-invoice-partner-${_lines.isNotEmpty}'),
+              options: _transitaires,
+              value: _transitaire,
+              label: 'Transitaire *',
+              emptyText: 'Ajoutez un transitaire dans Espace Prestataire',
+              displayString: (p) => p.entreprise,
+              onChanged: (p) => setState(() => _transitaire = p),
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 250,
+          child: SearchableDropdownFormField<Prestataire>(
+            key: const ValueKey('transitaire-invoice-carrier'),
+            options: _transporteurs,
+            value: _transporteur,
+            label: 'Transporteur',
+            emptyText: 'Ajoutez un transporteur dans Transport > Transporteurs',
+            required: false,
+            displayString: (p) => p.entreprise,
+            onChanged: (p) => setState(() {
+              _transporteur = p;
+              _vehicule = null;
+              _plateText.clear();
+              _driverPhone.clear();
+            }),
+          ),
+        ),
+        SizedBox(
+          width: 210,
+          child: vehicles.isEmpty
+              ? TextFormField(
+                  key: const ValueKey('transitaire-invoice-plate-text'),
+                  controller: _plateText,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: _inputDecoration(
+                    'Plaque véhicule',
+                    icon: Icons.local_shipping_outlined,
+                  ),
+                  onChanged: (_) => setState(() {}),
+                )
+              : DropdownButtonFormField<Vehicule>(
+                  key: ValueKey(
+                    'transitaire-invoice-plate-${_transporteur?.id}',
+                  ),
+                  isExpanded: true,
+                  initialValue: _vehicule,
+                  decoration: _inputDecoration(
+                    'Plaque véhicule',
+                    icon: Icons.local_shipping_outlined,
+                  ),
+                  items: [
+                    for (final v in vehicles)
+                      DropdownMenuItem(
+                        value: v,
+                        child: Text(
+                          v.chauffeur.isEmpty
+                              ? v.plaque
+                              : '${v.plaque} • ${v.chauffeur}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                  onChanged: (v) => setState(() {
+                    _vehicule = v;
+                    _plateText.text = v?.plaque ?? '';
+                    _driverPhone.text = v?.telephone ?? '';
+                  }),
+                ),
+        ),
+        SizedBox(
+          width: 190,
+          child: TextFormField(
+            key: const ValueKey('transitaire-invoice-driver-phone'),
+            controller: _driverPhone,
+            keyboardType: TextInputType.phone,
+            decoration: _inputDecoration(
+              'Tél. chauffeur',
+              icon: Icons.phone_rounded,
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 220,
+          child: TextFormField(
+            key: const ValueKey('transitaire-invoice-number'),
+            controller: _reference,
+            decoration: _inputDecoration(
+              'Numéro de facture *',
+              icon: Icons.tag_rounded,
+            ),
+            validator: _validateReference,
+          ),
+        ),
+        SizedBox(
+          width: 190,
+          child: _FormDateField(
+            label: 'Date de facture',
+            value: _date,
+            clearable: false,
+            onChanged: (date) => setState(() => _date = date ?? _date),
+          ),
+        ),
+        SizedBox(
+          width: 340,
+          child: TextFormField(
+            controller: _observations,
+            decoration: _inputDecoration(
+              'Observations',
+              icon: Icons.notes_rounded,
+            ),
+          ),
+        ),
+        _infoTile(
+          'Avance camion ${_currentPlate.isEmpty ? '' : '($_currentPlate)'}',
+          _amountText(_truckAdvance),
+          width: 190,
+        ),
+        _infoTile(
+          'Total transporteur ${_currentPlate.isEmpty ? '' : '($_currentPlate)'}',
+          _amountText(_truckTransport),
+          width: 200,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAvailableTab(List<_AvailableContainer> available) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          SizedBox(
+            width: 280,
+            child: TextField(
+              controller: _search,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                hintText: 'Rechercher un BL, un conteneur…',
+                isDense: true,
+                filled: true,
+                fillColor: Colors.white,
+                prefixIcon: const Icon(Icons.search_rounded),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ),
+          FilledButton.icon(
+            key: const ValueKey('available-add'),
+            onPressed: _selectedAvailable == null
+                ? null
+                : () => _add([_selectedAvailable!]),
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('Ajouter le conteneur'),
+          ),
+          FilledButton.tonalIcon(
+            key: const ValueKey('available-add-bl'),
+            onPressed: _selectedAvailable == null
+                ? null
+                : () => _add(
+                    available.where(
+                      (a) =>
+                          a.dossier.id == _selectedAvailable!.dossier.id &&
+                          a.dossier.numBL == _selectedAvailable!.dossier.numBL,
+                    ),
+                  ),
+            icon: const Icon(Icons.playlist_add_rounded),
+            label: const Text('Ajouter tout le BL'),
+          ),
+          Text(
+            _transporteur == null && _currentPlate.isEmpty
+                ? 'Astuce : choisissez le transporteur et la plaque en haut, ils seront repris par les conteneurs ajoutés.'
+                : 'Camion appliqué aux ajouts : ${_currentPlate.isEmpty ? '—' : _currentPlate}${_transporteur == null ? '' : ' (${_transporteur!.entreprise})'}',
+            style: const TextStyle(color: _gridMuted, fontSize: 12.5),
+          ),
+        ],
+      ),
+      const SizedBox(height: 10),
+      Expanded(
+        child: ErpGrid<_AvailableContainer>(
+          key: const ValueKey('available-containers-grid'),
+          columns: _availableColumns,
+          rows: available,
+          rowId: (a) => a.cle,
+          selected: _selectedAvailable,
+          onSelect: (a) => setState(() => _selectedAvailable = a),
+          onOpen: (a) => _add([a]),
+          emptyIcon: Icons.inventory_2_outlined,
+          emptyText: _transitaire == null
+              ? 'Choisissez d’abord le transitaire.'
+              : 'Aucun conteneur à facturer pour ce transitaire.',
+        ),
+      ),
+    ],
+  );
+
+  Widget _buildDetailsTab() {
     Widget cell(
       TextEditingController c, {
       String? hint,
@@ -1168,225 +1474,99 @@ class _TransitaireInvoiceDialogState extends State<_TransitaireInvoiceDialog> {
           ? const TextInputType.numberWithOptions(decimal: true)
           : null,
       decoration: _cellDecoration(hint: hint),
-      onChanged: amount ? (_) => setState(() {}) : null,
+      onChanged: (_) => setState(() {}),
     );
-    return Dialog(
-      insetPadding: const EdgeInsets.all(14),
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: SizedBox(
-        width: math.min(screen.width - 28, 1150),
-        height: math.min(screen.height - 28, 880),
-        child: Column(
-          children: [
-            _dialogHeader(
-              icon: Icons.directions_boat_rounded,
-              title: _isEdit
-                  ? 'Modifier la facture transitaire'
-                  : 'Nouvelle facture transitaire',
-              subtitle: '${d.numDossier} • ${d.client.nom}',
-              onClose: () => Navigator.pop(context),
-            ),
-            Expanded(
-              child: Container(
-                color: const Color(0xFFF4F6FB),
-                child: Form(
-                  key: _formKey,
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      _dialogSection(
-                        icon: Icons.folder_open_rounded,
-                        title: 'Dossier',
-                        child: Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: [
-                            _infoTile('Dossier', d.numDossier),
-                            _infoTile('Client', d.client.nom),
-                            _infoTile('BL', d.numBL),
-                            _infoTile('Marchandise', d.typeMarchandise),
-                            _infoTile(
-                              'Conteneurs 20 / 40 pieds',
-                              '${d.nbConteneurs20} / ${d.nbConteneurs40}',
-                            ),
-                          ],
-                        ),
-                      ),
-                      _dialogSection(
-                        icon: Icons.receipt_long_rounded,
-                        title: 'Facture',
-                        child: Wrap(
-                          spacing: 14,
-                          runSpacing: 14,
-                          children: [
-                            SizedBox(
-                              width: 280,
-                              child: SearchableDropdownFormField<Prestataire>(
-                                key: const ValueKey(
-                                  'transitaire-invoice-partner',
-                                ),
-                                options: widget.transitaires,
-                                value: _transitaire,
-                                label: 'Transitaire *',
-                                emptyText:
-                                    'Ajoutez un transitaire dans Espace Prestataire',
-                                displayString: (p) => p.entreprise,
-                                onChanged: (p) =>
-                                    setState(() => _transitaire = p),
-                              ),
-                            ),
-                            SizedBox(
-                              width: 260,
-                              child: TextFormField(
-                                key: const ValueKey(
-                                  'transitaire-invoice-number',
-                                ),
-                                controller: _reference,
-                                decoration: _inputDecoration(
-                                  'Numéro de facture *',
-                                  icon: Icons.tag_rounded,
-                                ),
-                                validator: _validateReference,
-                              ),
-                            ),
-                            SizedBox(
-                              width: 210,
-                              child: _FormDateField(
-                                label: 'Date de facture',
-                                value: _date,
-                                clearable: false,
-                                onChanged: (date) =>
-                                    setState(() => _date = date ?? _date),
-                              ),
-                            ),
-                            SizedBox(
-                              width: 500,
-                              child: TextFormField(
-                                controller: _observations,
-                                maxLines: 2,
-                                decoration: _inputDecoration(
-                                  'Observations',
-                                  icon: Icons.notes_rounded,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      _dialogSection(
-                        icon: Icons.local_shipping_rounded,
-                        title: 'Véhicules, conteneurs et frais',
-                        trailing: FilledButton.tonalIcon(
-                          key: const ValueKey('transitaire-line-add'),
-                          onPressed: () => setState(
-                            () => _lines.add(_TransitLineDraft(bl: d.numBL)),
-                          ),
-                          icon: const Icon(Icons.add_rounded),
-                          label: const Text('Ajouter une ligne'),
-                        ),
-                        child: _EditableTable(
-                          columns: const [
-                            ('Véhicule', 130),
-                            ('Tél. chauffeur', 140),
-                            ('BL', 140),
-                            ('Numéro conteneur', 160),
-                            ('Type conteneur', 120),
-                            ('Marchandise', 160),
-                            ('Frais de transit', 130),
-                            ('Volume et poids', 130),
-                            ('Surestaries / magasinage', 170),
-                            ('Frais de péage', 120),
-                            ('Autres frais', 120),
-                            ('Montant total', 140),
-                            ('', 52),
-                          ],
-                          rows: [
-                            for (final (i, line) in _lines.indexed)
-                              [
-                                cell(
-                                  line.plate,
-                                  hint: 'AB 1234 MD',
-                                  key: ValueKey('transitaire-line-$i-plate'),
-                                ),
-                                cell(line.driverPhone, hint: '+223 …'),
-                                cell(line.bl),
-                                cell(line.container),
-                                cell(line.containerType),
-                                cell(line.cargo),
-                                cell(
-                                  line.transit,
-                                  hint: '0',
-                                  amount: true,
-                                  key: ValueKey('transitaire-line-$i-transit'),
-                                ),
-                                cell(line.volume, hint: '0', amount: true),
-                                cell(line.demurrage, hint: '0', amount: true),
-                                cell(
-                                  line.toll,
-                                  hint: '0',
-                                  amount: true,
-                                  key: ValueKey('transitaire-line-$i-toll'),
-                                ),
-                                cell(line.other, hint: '0', amount: true),
-                                Text(
-                                  _amountText(line.total),
-                                  key: ValueKey('transitaire-line-total-$i'),
-                                  textAlign: TextAlign.right,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: _gridPrimary,
-                                  ),
-                                ),
-                                IconButton(
-                                  tooltip: 'Retirer la ligne',
-                                  onPressed: _lines.length == 1
-                                      ? null
-                                      : () => setState(
-                                          () => _lines.removeAt(i).dispose(),
-                                        ),
-                                  icon: const Icon(
-                                    Icons.delete_outline_rounded,
-                                    color: Colors.redAccent,
-                                  ),
-                                ),
-                              ],
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+    Widget fixed(String value) => Text(
+      value,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(color: _gridText),
+    );
+    return SingleChildScrollView(
+      child: _EditableTable(
+        emptyText:
+            'Aucun conteneur. Ajoutez-les depuis l’onglet « Liste des BL disponibles ».',
+        columns: const [
+          ('BL', 120),
+          ('Marchandise', 140),
+          ('Date de départ', 130),
+          ('Numéro conteneur', 150),
+          ('Type', 100),
+          ('Transporteur', 140),
+          ('Véhicule', 130),
+          ('Tél. chauffeur', 140),
+          ('Frais de transit', 130),
+          ('Surestaries / magasinage', 165),
+          ('Volume et poids', 130),
+          ('Autres frais', 120),
+          ('Frais de péage', 120),
+          ('Montant', 130),
+          ('Transport dû', 130),
+          ('Avance camion', 130),
+          ('', 52),
+        ],
+        rows: [
+          for (final (i, line) in _lines.indexed)
+            [
+              fixed(line.bl),
+              fixed(line.marchandise),
+              cell(line.dateDepart, hint: 'jj/mm/aaaa'),
+              fixed(line.numeroConteneur),
+              fixed(line.typeConteneur),
+              fixed(
+                widget.prestataires
+                        .where((p) => p.id == line.transporteurId)
+                        .firstOrNull
+                        ?.entreprise ??
+                    '—',
+              ),
+              cell(line.plaque, key: ValueKey('line-$i-plate')),
+              cell(line.telephone),
+              cell(
+                line.transit,
+                hint: '0',
+                amount: true,
+                key: ValueKey('line-$i-transit'),
+              ),
+              cell(line.demurrage, hint: '0', amount: true),
+              cell(line.volume, hint: '0', amount: true),
+              cell(line.other, hint: '0', amount: true),
+              cell(
+                line.toll,
+                hint: '0',
+                amount: true,
+                key: ValueKey('line-$i-toll'),
+              ),
+              Text(
+                _amountText(line.montant),
+                key: ValueKey('line-$i-total'),
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: _gridPrimary,
                 ),
               ),
-            ),
-            _dialogFooter(
-              onCancel: () => Navigator.pop(context),
-              onValidate: _saving ? null : _validate,
-              validateLabel: 'Valider la facture',
-              validateKey: const ValueKey('transitaire-invoice-validate'),
-              leading: Row(
-                children: [
-                  const Text(
-                    'Total facture : ',
-                    style: TextStyle(color: _gridMuted, fontSize: 15),
-                  ),
-                  Flexible(
-                    child: Text(
-                      '${formatCurrency(_total)} FCFA',
-                      key: const ValueKey('transitaire-invoice-total'),
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _gridPrimary,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
+              cell(
+                line.transport,
+                hint: '0',
+                amount: true,
+                key: ValueKey('line-$i-transport'),
               ),
-            ),
-          ],
-        ),
+              cell(
+                line.advance,
+                hint: '0',
+                amount: true,
+                key: ValueKey('line-$i-advance'),
+              ),
+              IconButton(
+                tooltip: 'Retirer de la facture',
+                onPressed: () => setState(() => _lines.removeAt(i).dispose()),
+                icon: const Icon(
+                  Icons.remove_circle_outline_rounded,
+                  color: Colors.redAccent,
+                ),
+              ),
+            ],
+        ],
       ),
     );
   }
@@ -1394,81 +1574,205 @@ class _TransitaireInvoiceDialogState extends State<_TransitaireInvoiceDialog> {
   String? _validateReference(String? value) {
     final reference = value?.trim() ?? '';
     if (reference.isEmpty) return 'Champ obligatoire';
-    final duplicate = widget.dossiers.any(
-      (d) =>
-          d.id != _dossier.id &&
-          _normalizeUniqueValue(d.factureTransitaire.reference) ==
+    final duplicate = widget.factures.any(
+      (f) =>
+          f.id != widget.initial?.id &&
+          _normalizeUniqueValue(f.reference) ==
               _normalizeUniqueValue(reference),
     );
     return duplicate ? 'Ce numéro de facture existe déjà' : null;
   }
 
-  Future<void> _validate() async {
+  Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     final transitaire = _transitaire;
-    if (transitaire == null) return;
-    if (_lines.any((l) => l.hasInvalidAmount)) {
+    String? problem;
+    if (transitaire == null) {
+      problem = 'Choisissez le transitaire.';
+    } else if (_lines.isEmpty) {
+      problem =
+          'Ajoutez au moins un conteneur depuis la liste des BL disponibles.';
+    } else if (_lines.any((l) => l.hasInvalidAmount)) {
+      problem =
+          'Vérifiez les montants saisis : seuls des nombres positifs sont acceptés.';
+    } else if (_lines.any(
+      (l) =>
+          l.dateDepart.text.trim().isNotEmpty &&
+          _parseFrDate(l.dateDepart.text) == null,
+    )) {
+      problem = 'Une date de départ est invalide (format jj/mm/aaaa).';
+    }
+    if (problem != null) {
       await _showInfoAlert(
         context,
-        title: 'Montant invalide',
-        message:
-            'Vérifiez les frais saisis : seuls des nombres positifs sont acceptés.',
+        title: 'Facture incomplète',
+        message: problem,
       );
       return;
     }
-    if (_total <= 0) {
-      await _showInfoAlert(
-        context,
-        title: 'Montant requis',
-        message: 'Saisissez au moins un frais pour cette facture.',
-      );
-      return;
-    }
-    final invoice = _invoice;
-    final previous = (
-      invoice.reference,
-      invoice.lignes,
-      invoice.montant,
-      invoice.statut,
-      invoice.dateEmission,
-      invoice.observations,
-      invoice.description,
-      _dossier.transitaireAffecte,
-      _dossier.prestataire,
-      _dossier.transitaire,
+    final initial = widget.initial;
+    final facture = FactureTransitaire(
+      id: initial?.id ?? newLocalId('ftr'),
+      numero: initial?.numero ?? 0,
+      reference: _reference.text.trim(),
+      transitaireId: transitaire!.id,
+      dateEmission: DateFormat('dd/MM/yyyy').format(_date),
+      observations: _observations.text.trim(),
+      lignes: _lines.map((l) => l.toLine()).toList(),
+      reglements: initial?.reglements,
+      version: initial?.version ?? 0,
+      auteur: initial?.auteur ?? (_currentUser?.name ?? ''),
+      dateSaisie:
+          initial?.dateSaisie ??
+          DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now()),
     );
-    invoice
-      ..reference = _reference.text.trim()
-      ..lignes = _lines.map((l) => l.toLine()).toList()
-      ..montant = _total
-      ..statut = 'Clôturée'
-      ..dateEmission = DateFormat('dd/MM/yyyy').format(_date)
-      ..observations = _observations.text.trim()
-      ..description = 'Transit du dossier ${_dossier.numDossier}';
-    _dossier.transitaireAffecte = transitaire;
-    _dossier.prestataire ??= transitaire;
     setState(() => _saving = true);
     final saved = await _persist(
       context,
-      () => erpBackend.saveDossier(_dossier),
+      () => erpBackend.saveFactureTransitaire(facture),
     );
+    if (!mounted) return;
     if (!saved) {
-      invoice
-        ..reference = previous.$1
-        ..lignes = previous.$2
-        ..montant = previous.$3
-        ..statut = previous.$4
-        ..dateEmission = previous.$5
-        ..observations = previous.$6
-        ..description = previous.$7;
-      _dossier
-        ..transitaireAffecte = previous.$8
-        ..prestataire = previous.$9;
-      if (mounted) setState(() => _saving = false);
+      setState(() => _saving = false);
       return;
     }
-    if (mounted) Navigator.pop(context, true);
+    Navigator.pop(context, facture);
   }
+}
+
+Future<void> _printFactureTransitaire(
+  FactureTransitaire f, {
+  required String transitaire,
+  required String Function(String) dossierNumber,
+  required String Function(String) partnerName,
+}) async {
+  final logo = await _loadPdfLogo();
+  final doc = pw.Document(
+    title: 'Facture ${f.reference}',
+    author: 'Sylla Transit & Transport',
+  );
+  doc.addPage(
+    pw.MultiPage(
+      pageFormat: PdfPageFormat.a4.landscape,
+      margin: const pw.EdgeInsets.all(24),
+      header: (context) => pw.Padding(
+        padding: const pw.EdgeInsets.only(bottom: 10),
+        child: pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.end,
+          children: [
+            if (logo != null) ...[
+              pw.Image(logo, height: 40),
+              pw.SizedBox(width: 10),
+            ],
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  'STT',
+                  style: pw.TextStyle(
+                    color: _pdfPrimary,
+                    fontSize: 18,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.Text(
+                  'SYLLA TRANSIT & TRANSPORT',
+                  style: const pw.TextStyle(fontSize: 8),
+                ),
+                pw.Text(
+                  'Transitaire : $transitaire',
+                  style: const pw.TextStyle(fontSize: 9),
+                ),
+              ],
+            ),
+            pw.Spacer(),
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.end,
+              children: [
+                pw.Text(
+                  'FACTURE TRANSITAIRE',
+                  style: pw.TextStyle(
+                    fontSize: 16,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.Text(
+                  'N° ${f.reference} du ${f.dateEmission}',
+                  style: const pw.TextStyle(fontSize: 9),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      footer: (context) => pw.Container(
+        alignment: pw.Alignment.centerRight,
+        child: pw.Text(
+          'Sylla Transit & Transport  |  Page ${context.pageNumber}/${context.pagesCount}',
+          style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey600),
+        ),
+      ),
+      build: (context) => [
+        _pdfTable(
+          [
+            'BL',
+            'Dossier',
+            'Conteneur',
+            'Type',
+            'Marchandise',
+            'Départ',
+            'Transporteur',
+            'Véhicule',
+            'Transit',
+            'Surestaries',
+            'Vol./poids',
+            'Autres',
+            'Péage',
+            'Montant',
+          ],
+          [
+            for (final l in f.lignes)
+              [
+                l.bl,
+                dossierNumber(l.dossierId),
+                l.numeroConteneur,
+                l.typeConteneur,
+                l.marchandise,
+                l.dateDepart,
+                partnerName(l.transporteurId),
+                l.plaque,
+                formatCurrency(l.fraisTransit),
+                formatCurrency(l.surestariesMagasinage),
+                formatCurrency(l.volumePoids),
+                formatCurrency(l.autresFrais),
+                formatCurrency(l.fraisPeage),
+                formatCurrency(l.montant),
+              ],
+          ],
+          numericColumns: {8, 9, 10, 11, 12, 13},
+          fontSize: 7.5,
+        ),
+        pw.SizedBox(height: 12),
+        _pdfTotals([
+          ('Total facture', '${formatCurrency(f.montant)} FCFA'),
+          ('Total payé', '${formatCurrency(f.totalRegle)} FCFA'),
+          ('Reliquat', '${formatCurrency(f.reliquat)} FCFA'),
+        ]),
+        if (f.observations.isNotEmpty) ...[
+          pw.SizedBox(height: 10),
+          pw.Text(
+            'Observations : ${f.observations}',
+            style: const pw.TextStyle(fontSize: 9),
+          ),
+        ],
+      ],
+    ),
+  );
+  await Printing.layoutPdf(
+    name: 'Facture ${f.reference}',
+    format: PdfPageFormat.a4.landscape,
+    onLayout: (_) => doc.save(),
+  );
 }
 
 // Nouveau règlement d'une facture.

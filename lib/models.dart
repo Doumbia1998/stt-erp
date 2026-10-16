@@ -390,7 +390,7 @@ class TransitDossier {
       factureClient.statut == 'Clôturée' &&
       (prestataire == null ||
           (prestataire!.type == 'Transitaire'
-              ? factureTransitaire.statut == 'Clôturée'
+              ? true
               : prestataire!.type == 'Transporteur'
               ? factureTransporteur.statut == 'Clôturée'
               : facturePrestataire.statut == 'Clôturée')) &&
@@ -464,6 +464,8 @@ class Prestataire {
   final int nombreVehicules;
   final double soldeInitial;
   String compteComptable;
+  // Camions du transporteur (plaque, chauffeur, téléphone).
+  List<Vehicule> vehicules;
 
   Prestataire({
     required this.id,
@@ -480,7 +482,8 @@ class Prestataire {
     this.nombreVehicules = 0,
     this.soldeInitial = 0,
     this.compteComptable = '',
-  });
+    List<Vehicule>? vehicules,
+  }) : vehicules = vehicules ?? [];
 }
 
 // Mode de règlement (espèces, chèque, virement…) relié aux journaux comptables.
@@ -561,3 +564,126 @@ String nextSubAccountCode(String general, Iterable<String> existingCodes) {
 // Compte « général » : numérique, au moins deux zéros finaux (41100000, 65880000…).
 bool isGeneralAccountCode(String code) =>
     RegExp(r'^\d{4,}$').hasMatch(code) && code.endsWith('00');
+
+class Vehicule {
+  final String id;
+  String plaque;
+  String chauffeur;
+  String telephone;
+
+  Vehicule({
+    required this.id,
+    required this.plaque,
+    this.chauffeur = '',
+    this.telephone = '',
+  });
+}
+
+// Conteneur facturé par un transitaire (un BL d'un dossier), avec son camion.
+class FactureTransitaireLigne {
+  String dossierId;
+  String bl;
+  String numeroConteneur;
+  String marchandise;
+  String typeConteneur;
+  String dateDepart;
+  String transporteurId;
+  String plaque;
+  String telephoneChauffeur;
+  double fraisTransit;
+  double surestariesMagasinage;
+  double volumePoids;
+  double autresFrais;
+  double fraisPeage;
+  // Transport dû au transporteur et avance déjà versée au camion.
+  double montantTransport;
+  double avanceCamion;
+
+  FactureTransitaireLigne({
+    this.dossierId = '',
+    this.bl = '',
+    this.numeroConteneur = '',
+    this.marchandise = '',
+    this.typeConteneur = '',
+    this.dateDepart = '',
+    this.transporteurId = '',
+    this.plaque = '',
+    this.telephoneChauffeur = '',
+    this.fraisTransit = 0,
+    this.surestariesMagasinage = 0,
+    this.volumePoids = 0,
+    this.autresFrais = 0,
+    this.fraisPeage = 0,
+    this.montantTransport = 0,
+    this.avanceCamion = 0,
+  });
+
+  double get montant =>
+      fraisTransit +
+      surestariesMagasinage +
+      volumePoids +
+      autresFrais +
+      fraisPeage;
+
+  // Identifie le conteneur d'un dossier (facturé une seule fois).
+  String get cleConteneur => '$dossierId|${numeroConteneur.toUpperCase()}';
+}
+
+class ReglementFacture {
+  final String id;
+  final String date;
+  final double montant;
+  final String codeJournal;
+  final String modePaiement;
+  final String numeroCheque;
+  final String observations;
+  final String auteur;
+  final String saisiLe;
+
+  ReglementFacture({
+    String? id,
+    required this.date,
+    required this.montant,
+    this.codeJournal = '',
+    this.modePaiement = '',
+    this.numeroCheque = '',
+    this.observations = '',
+    this.auteur = '',
+    this.saisiLe = '',
+  }) : id = id ?? newLocalId('reg');
+}
+
+// Facture d'un transitaire regroupant les conteneurs de plusieurs BL / dossiers.
+class FactureTransitaire {
+  final String id;
+  int numero;
+  String reference;
+  String transitaireId;
+  String dateEmission;
+  String observations;
+  List<FactureTransitaireLigne> lignes;
+  List<ReglementFacture> reglements;
+  int version;
+  String auteur;
+  String dateSaisie;
+
+  FactureTransitaire({
+    required this.id,
+    this.numero = 0,
+    required this.reference,
+    required this.transitaireId,
+    required this.dateEmission,
+    this.observations = '',
+    List<FactureTransitaireLigne>? lignes,
+    List<ReglementFacture>? reglements,
+    this.version = 0,
+    this.auteur = '',
+    this.dateSaisie = '',
+  }) : lignes = lignes ?? [],
+       reglements = reglements ?? [];
+
+  double get montant => lignes.fold(0, (s, l) => s + l.montant);
+  double get totalRegle => reglements.fold(0, (s, r) => s + r.montant);
+  double get reliquat => montant - totalRegle;
+  bool get estAcquittee => montant > 0 && reliquat <= 0.001;
+}

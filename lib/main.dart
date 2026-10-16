@@ -19,11 +19,13 @@ import 'models.dart';
 export 'erp_backend.dart' show ErpBackend, MemoryErpBackend, erpBackend;
 export 'models.dart';
 
+part 'pages/balance_comptes_page.dart';
 part 'pages/comptabilite_pages.dart';
 part 'pages/dossier_dialogs.dart';
 part 'pages/dossiers_page.dart';
 part 'pages/facture_transitaire_page.dart';
 part 'pages/frais_caisse_pages.dart';
+part 'pages/transporteurs_page.dart';
 part 'widgets/erp_documents.dart';
 part 'widgets/erp_grid.dart';
 part 'widgets/tiers_accounts.dart';
@@ -118,6 +120,7 @@ final List<JournalCode> _journalCodes = [];
 final List<Voyage> _voyages = [];
 final List<ModeReglement> _modesReglement = [];
 final List<TypeFrais> _typesFrais = [];
+final List<FactureTransitaire> _facturesTransitaire = [];
 
 void _loadErpData(ErpData data) {
   _currentUser = data.user;
@@ -148,6 +151,9 @@ void _loadErpData(ErpData data) {
   _typesFrais
     ..clear()
     ..addAll(data.typesFrais);
+  _facturesTransitaire
+    ..clear()
+    ..addAll(data.facturesTransitaire);
 }
 
 class TransitTrackerApp extends StatelessWidget {
@@ -601,6 +607,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       ErpMenuItem('Gestion des dépenses', Icons.money_off_csred_rounded),
       ErpMenuItem('Gestion des Avances', Icons.account_balance_wallet_rounded),
       ErpMenuItem('Voyages', Icons.route_rounded),
+      ErpMenuItem('Transporteurs', Icons.local_shipping_outlined),
       ErpMenuItem('Historique', Icons.history_rounded),
     ]),
     ErpModule('Transitaire', Icons.directions_boat_rounded, [
@@ -816,6 +823,11 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
         );
       case 'Dépenses & Frais':
         return TypesFraisPage(types: _typesFrais, comptes: _planAccounts);
+      case 'Balance des Comptes':
+        return BalanceComptesPage(
+          comptes: _planAccounts,
+          journals: _journalCodes,
+        );
       case 'Balance Agées':
         return BalanceAgeePage(clients: _clients, dossiers: _dossiers);
       case 'Saisie des Journaux':
@@ -839,6 +851,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           prestataires: _prestataires,
           journals: _journalCodes,
           modes: _modesReglement,
+          factures: _facturesTransitaire,
         );
       case 'Facture Transporteur':
         return DossierInvoicesPage(
@@ -846,6 +859,11 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           kind: DossierInvoiceKind.carrier,
           prestataires: _prestataires,
           userDisplayName: widget.userDisplayName,
+        );
+      case 'Transporteurs':
+        return TransporteursPage(
+          prestataires: _prestataires,
+          comptes: _planAccounts,
         );
       case 'Voyages':
         return VoyagesPage(dossiers: _dossiers, voyages: _voyages);
@@ -3870,15 +3888,39 @@ class _PrestatairesPageState extends State<PrestatairesPage> {
   }
 }
 
+class _VehicleDraft {
+  final String id;
+  final plaque = TextEditingController();
+  final chauffeur = TextEditingController();
+  final telephone = TextEditingController();
+
+  _VehicleDraft([Vehicule? vehicule]) : id = vehicule?.id ?? newLocalId('veh') {
+    plaque.text = vehicule?.plaque ?? '';
+    chauffeur.text = vehicule?.chauffeur ?? '';
+    telephone.text = vehicule?.telephone ?? '';
+  }
+
+  void dispose() {
+    plaque.dispose();
+    chauffeur.dispose();
+    telephone.dispose();
+  }
+}
+
+String _normalizePlate(String plate) =>
+    plate.toUpperCase().replaceAll(RegExp(r'\s+'), '');
+
 class _PrestataireFormDialog extends StatefulWidget {
   final List<Prestataire> prestataires;
   final List<PlanAccount> comptes;
   final Prestataire? initial;
+  final String? defaultType;
 
   const _PrestataireFormDialog({
     required this.prestataires,
     required this.comptes,
     this.initial,
+    this.defaultType,
   });
 
   @override
@@ -3898,6 +3940,7 @@ class _PrestataireFormDialogState extends State<_PrestataireFormDialog> {
   final _rccm = TextEditingController();
   final _vehicules = TextEditingController(text: '0');
   final _soldeInitial = TextEditingController(text: '0');
+  final List<_VehicleDraft> _trucks = [];
   PlanAccount? _selectedAccount;
   late String _type;
 
@@ -3905,7 +3948,10 @@ class _PrestataireFormDialogState extends State<_PrestataireFormDialog> {
   void initState() {
     super.initState();
     final provider = widget.initial;
-    _type = provider?.type ?? 'Transporteur';
+    _type = provider?.type ?? widget.defaultType ?? 'Transporteur';
+    _trucks.addAll(
+      (provider?.vehicules ?? const <Vehicule>[]).map(_VehicleDraft.new),
+    );
     if (provider == null) {
       _selectedAccount = _accountsForTiers(
         widget.comptes,
@@ -3945,6 +3991,9 @@ class _PrestataireFormDialogState extends State<_PrestataireFormDialog> {
     _adresse.dispose();
     _rccm.dispose();
     _vehicules.dispose();
+    for (final truck in _trucks) {
+      truck.dispose();
+    }
     _soldeInitial.dispose();
     super.dispose();
   }
@@ -4027,18 +4076,81 @@ class _PrestataireFormDialogState extends State<_PrestataireFormDialog> {
                 ),
                 _formField(_adresse, 'Adresse', maxLines: 2),
                 _formField(_rccm, 'RCCM'),
-                if (_type == 'Transporteur')
-                  _formField(
-                    _vehicules,
-                    'Nombre de véhicules',
-                    keyboardType: TextInputType.number,
-                    validator: (value) {
-                      final count = int.tryParse((value ?? '').trim());
-                      return count == null || count < 0
-                          ? 'Saisissez un nombre valide'
-                          : null;
-                    },
+                if (_type == 'Transporteur') ...[
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4, bottom: 8),
+                    child: Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      children: [
+                        const Icon(
+                          Icons.local_shipping_rounded,
+                          color: _gridAccent,
+                          size: 20,
+                        ),
+                        Text(
+                          'Camions du transporteur (${_trucks.length})',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: _gridText,
+                          ),
+                        ),
+                        TextButton.icon(
+                          key: const ValueKey('truck-add'),
+                          onPressed: () =>
+                              setState(() => _trucks.add(_VehicleDraft())),
+                          icon: const Icon(Icons.add_rounded),
+                          label: const Text('Ajouter un camion'),
+                        ),
+                      ],
+                    ),
                   ),
+                  _EditableTable(
+                    emptyText:
+                        'Aucun camion. Ajoutez chaque plaque avec son chauffeur.',
+                    columns: const [
+                      ('Plaque', 150),
+                      ('Chauffeur', 170),
+                      ('Téléphone chauffeur', 160),
+                      ('', 52),
+                    ],
+                    rows: [
+                      for (final (i, truck) in _trucks.indexed)
+                        [
+                          TextFormField(
+                            key: ValueKey('truck-plate-$i'),
+                            controller: truck.plaque,
+                            textCapitalization: TextCapitalization.characters,
+                            decoration: _cellDecoration(hint: 'AB 1234 MD'),
+                            validator: (value) => (value ?? '').trim().isEmpty
+                                ? 'Plaque obligatoire'
+                                : null,
+                          ),
+                          TextFormField(
+                            key: ValueKey('truck-driver-$i'),
+                            controller: truck.chauffeur,
+                            decoration: _cellDecoration(hint: 'Nom'),
+                          ),
+                          TextFormField(
+                            key: ValueKey('truck-phone-$i'),
+                            controller: truck.telephone,
+                            keyboardType: TextInputType.phone,
+                            decoration: _cellDecoration(hint: '+223 …'),
+                          ),
+                          IconButton(
+                            tooltip: 'Retirer ce camion',
+                            onPressed: () =>
+                                setState(() => _trucks.removeAt(i).dispose()),
+                            icon: const Icon(
+                              Icons.delete_outline_rounded,
+                              color: Colors.redAccent,
+                            ),
+                          ),
+                        ],
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 _formField(
                   _soldeInitial,
                   'Solde initial fournisseur (FCFA)',
@@ -4151,6 +4263,34 @@ class _PrestataireFormDialogState extends State<_PrestataireFormDialog> {
     final openingBalance = double.parse(
       _soldeInitial.text.trim().replaceAll(' ', '').replaceAll(',', '.'),
     );
+    final trucks = [
+      for (final t in _trucks)
+        if (t.plaque.text.trim().isNotEmpty)
+          Vehicule(
+            id: t.id,
+            plaque: t.plaque.text.trim().toUpperCase(),
+            chauffeur: t.chauffeur.text.trim(),
+            telephone: t.telephone.text.trim(),
+          ),
+    ];
+    final plates = trucks.map((t) => _normalizePlate(t.plaque)).toList();
+    if (plates.toSet().length != plates.length) {
+      _showMessage('Une même plaque est saisie deux fois.');
+      return;
+    }
+    final owner = widget.prestataires
+        .where(
+          (p) =>
+              p.id != widget.initial?.id &&
+              p.vehicules.any(
+                (v) => plates.contains(_normalizePlate(v.plaque)),
+              ),
+        )
+        .firstOrNull;
+    if (owner != null) {
+      _showMessage('Une de ces plaques appartient déjà à ${owner.entreprise}.');
+      return;
+    }
     Navigator.pop(
       context,
       Prestataire(
@@ -4169,7 +4309,10 @@ class _PrestataireFormDialogState extends State<_PrestataireFormDialog> {
             : _services.text.trim(),
         adresse: _adresse.text.trim(),
         rccm: _rccm.text.trim(),
-        nombreVehicules: int.parse(_vehicules.text.trim()),
+        nombreVehicules: _type == 'Transporteur'
+            ? trucks.length
+            : int.tryParse(_vehicules.text.trim()) ?? 0,
+        vehicules: _type == 'Transporteur' ? trucks : const [],
         soldeInitial: openingBalance,
         compteComptable: account.code,
       ),

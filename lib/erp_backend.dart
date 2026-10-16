@@ -29,6 +29,7 @@ class ErpData {
   final List<TransitDossier> dossiers;
   final List<ModeReglement> modesReglement;
   final List<TypeFrais> typesFrais;
+  final List<FactureTransitaire> facturesTransitaire;
 
   const ErpData({
     required this.user,
@@ -41,6 +42,7 @@ class ErpData {
     required this.dossiers,
     this.modesReglement = const [],
     this.typesFrais = const [],
+    this.facturesTransitaire = const [],
   });
 }
 
@@ -67,6 +69,23 @@ class JournauxSynthese {
   final String derniereMiseAJour;
 
   const JournauxSynthese(this.periodes, this.derniereMiseAJour);
+}
+
+// Ligne de la balance des comptes.
+class BalanceLigne {
+  final String compte;
+  final String intitule;
+  final double debit;
+  final double credit;
+  final double solde;
+
+  const BalanceLigne({
+    required this.compte,
+    required this.intitule,
+    required this.debit,
+    required this.credit,
+    required this.solde,
+  });
 }
 
 // Ligne d'écriture comptable.
@@ -123,6 +142,9 @@ abstract class ErpBackend {
   // Enregistre le type de frais ; renvoie le sous-compte créé (ou null).
   Future<PlanAccount?> saveTypeFrais(TypeFrais type);
   Future<void> deleteTypeFrais(TypeFrais type);
+  // Met à jour la version et le numéro de la facture après l'enregistrement.
+  Future<void> saveFactureTransitaire(FactureTransitaire facture);
+  Future<void> deleteFactureTransitaire(FactureTransitaire facture);
 
   // Comptabilité générée depuis la gestion.
   Future<MiseAJourResultat> miseAJourComptable({
@@ -132,6 +154,14 @@ abstract class ErpBackend {
   });
   Future<JournauxSynthese> journauxComptables(int annee);
   Future<List<EcritureLigne>> ecritures(String journal, String mois);
+  Future<List<BalanceLigne>> balanceComptes({
+    required String du,
+    required String au,
+    String? compteDu,
+    String? compteAu,
+    String? journalDu,
+    String? journalAu,
+  });
   // Met à jour la version, l'ID et la saisie du dossier après l'enregistrement.
   Future<void> saveDossier(TransitDossier dossier);
   Future<void> deleteDossier(TransitDossier dossier);
@@ -219,6 +249,10 @@ class HttpErpBackend implements ErpBackend {
       typesFrais: ((json['typesFrais'] as List?) ?? const [])
           .cast<Map<String, dynamic>>()
           .map(typeFraisFromJson)
+          .toList(),
+      facturesTransitaire: ((json['facturesTransitaire'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(factureTransitaireFromJson)
           .toList(),
       dossiers: [
         for (final dossier in rows('dossiers'))
@@ -319,6 +353,22 @@ class HttpErpBackend implements ErpBackend {
       _send('DELETE', '/types-frais/${_segment(type.id)}');
 
   @override
+  Future<void> saveFactureTransitaire(FactureTransitaire facture) async {
+    final result = await _send(
+      'PUT',
+      '/factures-transitaire/${_segment(facture.id)}',
+      factureTransitaireToJson(facture),
+    );
+    facture
+      ..version = (result['version'] as num).toInt()
+      ..numero = (result['numero'] as num?)?.toInt() ?? facture.numero;
+  }
+
+  @override
+  Future<void> deleteFactureTransitaire(FactureTransitaire facture) =>
+      _send('DELETE', '/factures-transitaire/${_segment(facture.id)}');
+
+  @override
   Future<MiseAJourResultat> miseAJourComptable({
     required String du,
     required String au,
@@ -367,6 +417,38 @@ class HttpErpBackend implements ErpBackend {
           : 'Dernière mise à jour le ${last['le']} par ${last['auteur']} '
                 '(du ${last['du']} au ${last['au']}, ${last['ecritures']} écritures)',
     );
+  }
+
+  @override
+  Future<List<BalanceLigne>> balanceComptes({
+    required String du,
+    required String au,
+    String? compteDu,
+    String? compteAu,
+    String? journalDu,
+    String? journalAu,
+  }) async {
+    final query = Uri(
+      queryParameters: {
+        'du': du,
+        'au': au,
+        'compteDu': ?compteDu,
+        'compteAu': ?compteAu,
+        'journalDu': ?journalDu,
+        'journalAu': ?journalAu,
+      },
+    ).query;
+    final rows = await _send('GET', '/comptabilite/balance?$query') as List;
+    return [
+      for (final r in rows.cast<Map<String, dynamic>>())
+        BalanceLigne(
+          compte: r['compte'] as String? ?? '',
+          intitule: r['intitule'] as String? ?? '',
+          debit: (r['debit'] as num).toDouble(),
+          credit: (r['credit'] as num).toDouble(),
+          solde: (r['solde'] as num).toDouble(),
+        ),
+    ];
   }
 
   @override
@@ -422,6 +504,7 @@ class MemoryErpBackend implements ErpBackend {
   final List<TransitDossier> dossiers = [];
   final List<ModeReglement> modesReglement = [];
   final List<TypeFrais> typesFrais = [];
+  final List<FactureTransitaire> facturesTransitaire = [];
   final Map<String, String> _passwords = {};
 
   MemoryErpBackend({String adminPassword = '1234'})
@@ -485,6 +568,7 @@ class MemoryErpBackend implements ErpBackend {
       dossiers: [...dossiers],
       modesReglement: [...modesReglement],
       typesFrais: [...typesFrais],
+      facturesTransitaire: [...facturesTransitaire],
     );
   }
 
@@ -567,6 +651,29 @@ class MemoryErpBackend implements ErpBackend {
   Future<void> deleteTypeFrais(TypeFrais type) async =>
       typesFrais.removeWhere((t) => t.id == type.id);
 
+  @override
+  Future<void> saveFactureTransitaire(FactureTransitaire facture) async {
+    final taken = {
+      for (final f in facturesTransitaire)
+        if (f.id != facture.id)
+          for (final l in f.lignes)
+            if (l.numeroConteneur.isNotEmpty) l.cleConteneur,
+    };
+    if (facture.lignes.any((l) => taken.contains(l.cleConteneur))) {
+      throw const ErpBackendException(
+        'Un des conteneurs est déjà facturé dans une autre facture transitaire.',
+        status: 409,
+      );
+    }
+    facture.version += 1;
+    if (facture.numero == 0) facture.numero = facturesTransitaire.length + 1;
+    _upsert(facturesTransitaire, facture, (f) => f.id == facture.id);
+  }
+
+  @override
+  Future<void> deleteFactureTransitaire(FactureTransitaire facture) async =>
+      facturesTransitaire.removeWhere((f) => f.id == facture.id);
+
   // La version en mémoire n'a pas de comptabilité : rien à déverser.
   @override
   Future<MiseAJourResultat> miseAJourComptable({
@@ -582,6 +689,16 @@ class MemoryErpBackend implements ErpBackend {
   @override
   Future<List<EcritureLigne>> ecritures(String journal, String mois) async =>
       const [];
+
+  @override
+  Future<List<BalanceLigne>> balanceComptes({
+    required String du,
+    required String au,
+    String? compteDu,
+    String? compteAu,
+    String? journalDu,
+    String? journalAu,
+  }) async => const [];
 
   @override
   Future<void> saveDossier(TransitDossier dossier) async {

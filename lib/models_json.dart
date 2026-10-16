@@ -66,9 +66,27 @@ Prestataire prestataireFromJson(Map<String, dynamic> json) => Prestataire(
   nombreVehicules: (json['nombreVehicules'] as num?)?.toInt() ?? 0,
   soldeInitial: _num(json['soldeInitial']),
   compteComptable: _str(json['compteComptable']),
+  vehicules: [
+    for (final v in (json['vehicules'] as List? ?? const []))
+      Vehicule(
+        id: v['id'] as String,
+        plaque: _str(v['plaque']),
+        chauffeur: _str(v['chauffeur']),
+        telephone: _str(v['telephone']),
+      ),
+  ],
 );
 
 Map<String, dynamic> prestataireToJson(Prestataire provider) => {
+  'vehicules': [
+    for (final v in provider.vehicules)
+      {
+        'id': v.id,
+        'plaque': v.plaque,
+        'chauffeur': v.chauffeur,
+        'telephone': v.telephone,
+      },
+  ],
   'entreprise': provider.entreprise,
   'type': provider.type,
   'pays': provider.pays,
@@ -401,4 +419,93 @@ Map<String, dynamic> typeFraisToJson(TypeFrais type) => {
   'libelle': type.libelle,
   'montant': type.montant,
   'compteGeneral': type.compteGeneral,
+};
+
+FactureTransitaire factureTransitaireFromJson(Map<String, dynamic> json) =>
+    FactureTransitaire(
+      id: json['id'] as String,
+      numero: (json['numero'] as num?)?.toInt() ?? 0,
+      reference: _str(json['reference']),
+      transitaireId: _str(json['transitaireId']),
+      dateEmission: _str(json['dateEmission']),
+      observations: _str(json['observations']),
+      version: (json['version'] as num?)?.toInt() ?? 0,
+      auteur: _str(json['auteur']),
+      dateSaisie: _str(json['dateSaisie']),
+      lignes: [
+        for (final l in (json['lignes'] as List? ?? const []))
+          FactureTransitaireLigne(
+            dossierId: _str(l['dossierId']),
+            bl: _str(l['bl']),
+            numeroConteneur: _str(l['numeroConteneur']),
+            marchandise: _str(l['marchandise']),
+            typeConteneur: _str(l['typeConteneur']),
+            dateDepart: _str(l['dateDepart']),
+            transporteurId: _str(l['transporteurId']),
+            plaque: _str(l['plaque']),
+            telephoneChauffeur: _str(l['telephoneChauffeur']),
+            fraisTransit: _num(l['fraisTransit']),
+            surestariesMagasinage: _num(l['surestariesMagasinage']),
+            volumePoids: _num(l['volumePoids']),
+            autresFrais: _num(l['autresFrais']),
+            fraisPeage: _num(l['fraisPeage']),
+            montantTransport: _num(l['montantTransport']),
+            avanceCamion: _num(l['avanceCamion']),
+          ),
+      ],
+      reglements: [
+        for (final r in (json['reglements'] as List? ?? const []))
+          ReglementFacture(
+            id: r['id'] as String,
+            date: _str(r['date']),
+            montant: _num(r['montant']),
+            codeJournal: _str(r['codeJournal']),
+            modePaiement: _str(r['modePaiement']),
+            numeroCheque: _str(r['numeroCheque']),
+            observations: _str(r['observations']),
+            auteur: _str(r['auteur']),
+            saisiLe: _str(r['saisiLe']),
+          ),
+      ],
+    );
+
+Map<String, dynamic> factureTransitaireToJson(FactureTransitaire f) => {
+  'reference': f.reference,
+  'transitaireId': f.transitaireId,
+  'dateEmission': f.dateEmission,
+  'observations': f.observations,
+  'version': f.version,
+  'lignes': [
+    for (final l in f.lignes)
+      {
+        'dossierId': l.dossierId,
+        'bl': l.bl,
+        'numeroConteneur': l.numeroConteneur,
+        'marchandise': l.marchandise,
+        'typeConteneur': l.typeConteneur,
+        'dateDepart': l.dateDepart,
+        'transporteurId': l.transporteurId,
+        'plaque': l.plaque,
+        'telephoneChauffeur': l.telephoneChauffeur,
+        'fraisTransit': l.fraisTransit,
+        'surestariesMagasinage': l.surestariesMagasinage,
+        'volumePoids': l.volumePoids,
+        'autresFrais': l.autresFrais,
+        'fraisPeage': l.fraisPeage,
+        'montantTransport': l.montantTransport,
+        'avanceCamion': l.avanceCamion,
+      },
+  ],
+  'reglements': [
+    for (final r in f.reglements)
+      {
+        'id': r.id,
+        'date': r.date,
+        'montant': r.montant,
+        'codeJournal': r.codeJournal,
+        'modePaiement': r.modePaiement,
+        'numeroCheque': r.numeroCheque,
+        'observations': r.observations,
+      },
+  ],
 };

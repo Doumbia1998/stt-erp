@@ -39,7 +39,15 @@ const clientJson = (r) => ({
   compteComptable: r.compte_comptable ?? '',
 });
 
-const prestataireJson = (r) => ({
+const vehiculeJson = (v) => ({
+  id: v.id,
+  plaque: v.plaque,
+  chauffeur: v.chauffeur,
+  telephone: v.telephone,
+});
+
+const prestataireJson = (r, vehicules = []) => ({
+  vehicules: vehicules.map(vehiculeJson),
   id: r.id,
   entreprise: r.entreprise,
   type: r.type,
@@ -221,9 +229,28 @@ function referentielsRouter(pool) {
           previous.rows[0]?.compte_comptable,
           values[13],
         );
-        return rows[0];
+        // Camions du transporteur (remplacés à chaque enregistrement de la fiche).
+        await client.query('DELETE FROM vehicules WHERE transporteur_id = $1', [values[0]]);
+        const vehicules = [];
+        for (const [position, v] of list(b, 'vehicules', { max: 500 }).entries()) {
+          const plaque = text(v, 'plaque', { required: true, max: 30 }).toUpperCase();
+          const { rows: saved } = await client.query(
+            `INSERT INTO vehicules (id, transporteur_id, position, plaque, chauffeur, telephone)
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+            [
+              text(v, 'id', { required: true, max: 120 }),
+              values[0],
+              position,
+              plaque,
+              text(v, 'chauffeur', { max: 120 }),
+              text(v, 'telephone', { max: 40 }),
+            ],
+          );
+          vehicules.push(saved[0]);
+        }
+        return { row: rows[0], vehicules };
       });
-      res.json(prestataireJson(row));
+      res.json(prestataireJson(row.row, row.vehicules));
     } catch (error) {
       next(error);
     }
@@ -531,6 +558,7 @@ function referentielsRouter(pool) {
 
 module.exports = {
   referentielsRouter,
+  vehiculeJson,
   clientJson,
   prestataireJson,
   compteJson,

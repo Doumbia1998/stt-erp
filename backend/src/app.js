@@ -12,6 +12,10 @@ const {
   typeFraisJson,
 } = require('./routes/referentiels');
 const { comptabiliteRouter } = require('./routes/comptabilite');
+const {
+  facturesTransitaireRouter,
+  loadFacturesTransitaire,
+} = require('./routes/facturesTransitaire');
 const { dossiersRouter, loadDossiers } = require('./routes/dossiers');
 
 function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
@@ -94,7 +98,8 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
   // Toutes les données de l'ERP, chargées après la connexion.
   api.get('/donnees', async (req, res, next) => {
     try {
-      const [clients, prestataires, comptes, journaux, voyages, dossiers, users, modes, frais] =
+      const [clients, prestataires, comptes, journaux, voyages, dossiers, users, modes, frais,
+        vehicules, facturesTransitaire] =
         await Promise.all([
           pool.query('SELECT * FROM clients ORDER BY cree_le, id'),
           pool.query('SELECT * FROM prestataires ORDER BY cree_le, id'),
@@ -107,17 +112,27 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
             : { rows: [] },
           pool.query('SELECT * FROM modes_reglement ORDER BY lower(intitule)'),
           pool.query('SELECT * FROM types_frais ORDER BY lower(libelle)'),
+          pool.query('SELECT * FROM vehicules ORDER BY transporteur_id, position'),
+          loadFacturesTransitaire(pool),
         ]);
+      const vehiculesBy = new Map();
+      for (const v of vehicules.rows) {
+        if (!vehiculesBy.has(v.transporteur_id)) vehiculesBy.set(v.transporteur_id, []);
+        vehiculesBy.get(v.transporteur_id).push(v);
+      }
       res.json({
         utilisateur: req.user,
         utilisateurs: users.rows.map(publicUser),
         clients: clients.rows.map(clientJson),
-        prestataires: prestataires.rows.map(prestataireJson),
+        prestataires: prestataires.rows.map((p) =>
+          prestataireJson(p, vehiculesBy.get(p.id) ?? []),
+        ),
         comptes: comptes.rows.map(compteJson),
         journaux: journaux.rows.map(journalJson),
         voyages: voyages.rows.map(voyageJson),
         modesReglement: modes.rows.map(modeReglementJson),
         typesFrais: frais.rows.map(typeFraisJson),
+        facturesTransitaire,
         dossiers,
       });
     } catch (error) {
@@ -128,6 +143,7 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
   api.use(referentielsRouter(pool));
   api.use(dossiersRouter(pool));
   api.use(comptabiliteRouter(pool));
+  api.use(facturesTransitaireRouter(pool));
   app.use('/api/v1', api);
 
   app.use((_req, res) => {

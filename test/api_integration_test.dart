@@ -158,6 +158,76 @@ void main() {
         after.dossiers.singleWhere((d) => d.id == dossier.id).operations,
         isEmpty,
       );
+      // Transporteur avec camions et facture transitaire sur le conteneur du dossier.
+      final transitaire = Prestataire(
+        id: 'transit-$suffix',
+        entreprise: 'Transitaire $suffix',
+        type: 'Transitaire',
+        pays: 'Mali',
+        villePort: 'Bamako',
+        contact: '',
+        telephone: '',
+        email: '',
+        services: '',
+      );
+      final carrier = Prestataire(
+        id: 'carrier-$suffix',
+        entreprise: 'Transport $suffix',
+        type: 'Transporteur',
+        pays: 'Mali',
+        villePort: 'Bamako',
+        contact: '',
+        telephone: '',
+        email: '',
+        services: '',
+        vehicules: [
+          Vehicule(
+            id: 'veh-$suffix',
+            plaque: 'T$suffix'.substring(0, 9),
+            chauffeur: 'Moussa',
+            telephone: '70000001',
+          ),
+        ],
+      );
+      await backend.savePrestataire(transitaire);
+      await backend.savePrestataire(carrier);
+      final facture = FactureTransitaire(
+        id: 'ftr-$suffix',
+        reference: 'FAC-TRS-$suffix',
+        transitaireId: transitaire.id,
+        dateEmission: '16/10/2026',
+        lignes: [
+          FactureTransitaireLigne(
+            dossierId: dossier.id,
+            bl: dossier.numBL,
+            numeroConteneur: 'MSKU1234567',
+            transporteurId: carrier.id,
+            plaque: carrier.vehicules.single.plaque,
+            fraisTransit: 40000,
+            montantTransport: 250000,
+            avanceCamion: 50000,
+          ),
+        ],
+      );
+      await backend.saveFactureTransitaire(facture);
+      expect(facture.version, 1);
+      expect(facture.numero, greaterThan(0));
+      final withInvoice = await backend.reload();
+      final reloadedInvoice = withInvoice.facturesTransitaire.singleWhere(
+        (f) => f.id == facture.id,
+      );
+      expect(reloadedInvoice.montant, 40000);
+      expect(reloadedInvoice.lignes.single.avanceCamion, 50000);
+      expect(
+        withInvoice.prestataires
+            .singleWhere((p) => p.id == carrier.id)
+            .vehicules
+            .single
+            .chauffeur,
+        'Moussa',
+      );
+      await backend.deleteFactureTransitaire(facture);
+
       await backend.logout();
     },
     skip: _url.isEmpty ? 'API_TEST_URL non défini' : null,

@@ -854,8 +854,10 @@ class _DossiersPageState extends State<DossiersPage> {
       );
       return;
     }
-    if (!dossier.peutCloturer) {
+    final transitIssue = _transitaireClosureIssue(dossier);
+    if (!dossier.peutCloturer || transitIssue != null) {
       final reasons = [
+        if (transitIssue != null) '• $transitIssue ;',
         if (!dossier.estFacture) '• le dossier n’est pas encore facturé ;',
         if (dossier.soldeClient > 0)
           '• le client doit encore ${_amountText(dossier.soldeClient)} ;',

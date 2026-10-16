@@ -138,6 +138,63 @@ async function buildEntries(client, du, au, categories) {
     }
   }
 
+  // Factures transitaire (plusieurs BL / dossiers) et leurs règlements.
+  const { rows: transitInvoices } = await client.query(
+    `SELECT f.id, f.reference, f.montant, f.date_emission, p.entreprise, p.compte_comptable
+     FROM factures_transitaire f LEFT JOIN prestataires p ON p.id = f.transitaire_id
+     WHERE f.montant > 0 AND f.date_emission BETWEEN $1 AND $2`,
+    [du, au],
+  );
+  if (wanted.has('transit')) {
+    for (const f of transitInvoices) {
+      const amount = round(f.montant);
+      const nom = f.entreprise || 'Transitaire';
+      push({
+        journal: JOURNAUX.achats.code,
+        categorie: 'transit',
+        date: f.date_emission,
+        piece: f.reference,
+        libelle: `Frais de transit ${f.reference} • ${nom}`,
+        source: `facture-transitaire:${f.id}`,
+        lines: [
+          { compte: COMPTES.fraisTransit, libelle: f.reference, debit: amount, credit: 0 },
+          { compte: f.compte_comptable || COMPTES.transitaires, libelle: nom, debit: 0, credit: amount },
+        ],
+      });
+    }
+  }
+  if (wanted.has('reglements')) {
+    const { rows: transitPayments } = await client.query(
+      `SELECT r.facture_id, r.uid, r.montant, r.date::date AS jour, r.code_journal,
+         f.reference, p.entreprise, p.compte_comptable
+       FROM facture_transitaire_reglements r
+       JOIN factures_transitaire f ON f.id = r.facture_id
+       LEFT JOIN prestataires p ON p.id = f.transitaire_id
+       WHERE r.date::date BETWEEN $1 AND $2`,
+      [du, au],
+    );
+    for (const r of transitPayments) {
+      if (!r.code_journal) {
+        ignored.push(`Règlement transitaire sans caisse (${r.reference})`);
+        continue;
+      }
+      const amount = round(r.montant);
+      const nom = r.entreprise || 'Transitaire';
+      push({
+        journal: r.code_journal,
+        categorie: 'reglements',
+        date: r.jour,
+        piece: r.reference,
+        libelle: `Règlement ${nom} • ${r.reference}`,
+        source: `reglement-transitaire:${r.facture_id}:${r.uid}`,
+        lines: [
+          { compte: r.compte_comptable || COMPTES.transitaires, libelle: nom, debit: amount, credit: 0 },
+          { compte: treasuryOf(r.code_journal), libelle: r.reference, debit: 0, credit: amount },
+        ],
+      });
+    }
+  }
+
   // Mouvements des dossiers (règlements, avances, factures complémentaires).
   const { rows: operations } = await client.query(
     `SELECT dossier_id, uid, type, titre, categorie, montant, date::date AS jour, code_journal
@@ -370,6 +427,49 @@ function comptabiliteRouter(pool) {
             }
           : null,
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Balance des comptes : mouvements débit / crédit par compte sur une période.
+  router.get('/comptabilite/balance', async (req, res, next) => {
+    try {
+      const du = frDateToSql(req.query.du, 'du');
+      const au = frDateToSql(req.query.au, 'au');
+      if (!du || !au) throw badRequest('Indiquez la période de la balance.');
+      const clean = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null);
+      const { rows } = await pool.query(
+        `SELECT l.compte, COALESCE(p.libelle, '') AS intitule,
+           sum(l.debit) AS debit, sum(l.credit) AS credit
+         FROM ecriture_lignes l
+         JOIN ecritures e ON e.id = l.ecriture_id
+         LEFT JOIN plan_comptable p ON p.code = l.compte
+         WHERE e.date BETWEEN $1 AND $2
+           AND ($3::text IS NULL OR l.compte >= $3)
+           AND ($4::text IS NULL OR l.compte <= $4)
+           AND ($5::text IS NULL OR e.journal_code >= $5)
+           AND ($6::text IS NULL OR e.journal_code <= $6)
+         GROUP BY l.compte, p.libelle
+         ORDER BY l.compte`,
+        [
+          du,
+          au,
+          clean(req.query.compteDu),
+          clean(req.query.compteAu),
+          clean(req.query.journalDu),
+          clean(req.query.journalAu),
+        ],
+      );
+      res.json(
+        rows.map((r) => ({
+          compte: r.compte,
+          intitule: r.intitule,
+          debit: r.debit,
+          credit: r.credit,
+          solde: round(r.debit - r.credit),
+        })),
+      );
     } catch (error) {
       next(error);
     }

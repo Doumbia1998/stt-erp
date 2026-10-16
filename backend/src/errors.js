@@ -39,6 +39,9 @@ const uniqueMessages = {
   dossiers_num_dossier_key: 'Ce numéro de dossier existe déjà.',
   modes_reglement_intitule_unique: 'Ce mode de règlement existe déjà.',
   types_frais_libelle_unique: 'Ce type de frais existe déjà.',
+  vehicules_plaque_unique: 'Cette plaque est déjà attribuée à un transporteur.',
+  vehicules_pkey: 'Ce camion est déjà enregistré pour un autre transporteur.',
+  factures_transitaire_reference_key: 'Ce numéro de facture transitaire existe déjà.',
   factures_reference_key: 'Cette référence de facture existe déjà.',
 };
 

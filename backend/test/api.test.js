@@ -582,3 +582,138 @@ test('fee types create their sub-account under the general account', async () =>
   assert.ok(cad.body.some((l) => l.compte === '65880001' && l.debit === 15000));
   assert.ok(cad.body.some((l) => l.compte === '638000' && l.debit === 5000));
 });
+
+test('carriers own trucks and transit invoices group several dossiers', async () => {
+  const carrier = await call('PUT', '/prestataires/transp-1', {
+    entreprise: 'SOSAF',
+    type: 'Transporteur',
+    vehicules: [
+      { id: 'veh-1', plaque: 'ab 1234 md', chauffeur: 'Moussa', telephone: '70 00 00 01' },
+      { id: 'veh-2', plaque: 'AC 5678 MD', chauffeur: 'Issa', telephone: '70 00 00 02' },
+    ],
+  });
+  assert.equal(carrier.status, 200);
+  assert.deepEqual(carrier.body.vehicules.map((v) => v.plaque), ['AB 1234 MD', 'AC 5678 MD']);
+  const stolen = await call('PUT', '/prestataires/transp-2', {
+    entreprise: 'STL',
+    type: 'Transporteur',
+    vehicules: [{ id: 'veh-3', plaque: 'AB1234MD' }],
+  });
+  assert.equal(stolen.status, 409);
+
+  assert.equal(
+    (await call('PUT', '/prestataires/transit-1', { entreprise: 'EAT - BOUARE', type: 'Transitaire' })).status,
+    200,
+  );
+  const line = (dossierId, numero, transit) => ({
+    dossierId,
+    bl: 'BL-1',
+    numeroConteneur: numero,
+    marchandise: 'Riz',
+    typeConteneur: '40 pieds',
+    dateDepart: '15/10/2026',
+    transporteurId: 'transp-1',
+    plaque: 'AB 1234 MD',
+    telephoneChauffeur: '70 00 00 01',
+    fraisTransit: transit,
+    fraisPeage: 5000,
+    montantTransport: 300000,
+    avanceCamion: 100000,
+  });
+  const invoice = {
+    reference: 'FAC-TRS-1026-0101',
+    transitaireId: 'transit-1',
+    dateEmission: '16/10/2026',
+    observations: 'Deux BL',
+    lignes: [line('d1', 'MSKU1234567', 45000), line('d5', 'MSKU1234567', 50000)],
+    reglements: [],
+  };
+  const created = await call('PUT', '/factures-transitaire/ft-1', invoice);
+  assert.equal(created.status, 200);
+  assert.equal(created.body.montant, 105000);
+  assert.equal(created.body.version, 1);
+
+  // Le même conteneur d'un dossier ne peut pas être facturé deux fois.
+  const twice = await call('PUT', '/factures-transitaire/ft-2', {
+    ...invoice,
+    reference: 'FAC-TRS-1026-0102',
+    lignes: [line('d1', 'msku1234567', 1000)],
+  });
+  assert.equal(twice.status, 409);
+
+  const payment = {
+    id: 'reg-1',
+    date: '16/10/2026 15:00',
+    montant: 60000,
+    codeJournal: 'BQ',
+    modePaiement: 'VIREMENT BIM',
+  };
+  const paid = await call('PUT', '/factures-transitaire/ft-1', {
+    ...invoice,
+    version: 1,
+    reglements: [payment],
+  });
+  assert.equal(paid.status, 200);
+  assert.equal(paid.body.version, 2);
+  const changed = await call('PUT', '/factures-transitaire/ft-1', {
+    ...invoice,
+    version: 2,
+    lignes: [line('d1', 'MSKU1234567', 1)],
+    reglements: [payment],
+  });
+  assert.equal(changed.status, 409);
+  const overpaid = await call('PUT', '/factures-transitaire/ft-1', {
+    ...invoice,
+    version: 2,
+    reglements: [payment, { ...payment, id: 'reg-2', montant: 50000 }],
+  });
+  assert.equal(overpaid.status, 400);
+  assert.equal((await call('DELETE', '/factures-transitaire/ft-1')).status, 409);
+
+  const data = await call('GET', '/donnees');
+  const saved = data.body.facturesTransitaire.find((f) => f.id === 'ft-1');
+  assert.equal(saved.lignes.length, 2);
+  assert.equal(saved.lignes[0].plaque, 'AB 1234 MD');
+  assert.equal(saved.lignes[1].dossierId, 'd5');
+  assert.equal(saved.reglements[0].montant, 60000);
+  assert.equal(
+    data.body.prestataires.find((p) => p.id === 'transp-1').vehicules[1].chauffeur,
+    'Issa',
+  );
+
+  await call('POST', '/comptabilite/mise-a-jour', {
+    du: '01/10/2026',
+    au: '31/10/2026',
+    categories: ['transit', 'reglements'],
+  });
+  const purchases = await call('GET', '/comptabilite/ecritures?journal=ACH&mois=2026-10');
+  assert.ok(purchases.body.some((l) => l.piece === 'FAC-TRS-1026-0101' && l.debit === 105000));
+  const bank = await call('GET', '/comptabilite/ecritures?journal=BQ&mois=2026-10');
+  assert.ok(bank.body.some((l) => l.piece === 'FAC-TRS-1026-0101' && l.credit === 60000));
+});
+
+test('the trial balance sums each account and stays balanced', async () => {
+  const balance = await call(
+    'GET',
+    '/comptabilite/balance?du=01/10/2026&au=31/10/2026',
+  );
+  assert.equal(balance.status, 200);
+  assert.ok(balance.body.length > 0);
+  const debit = balance.body.reduce((s, r) => s + r.debit, 0);
+  const credit = balance.body.reduce((s, r) => s + r.credit, 0);
+  assert.equal(Math.round(debit), Math.round(credit));
+  const clients = balance.body.find((r) => r.compte === '411002');
+  assert.equal(clients.intitule, 'Client Test');
+  assert.equal(clients.solde, clients.debit - clients.credit);
+  const only411 = await call(
+    'GET',
+    '/comptabilite/balance?du=01/10/2026&au=31/10/2026&compteDu=411&compteAu=411999',
+  );
+  assert.ok(only411.body.every((r) => r.compte.startsWith('411')));
+  const onlyVen = await call(
+    'GET',
+    '/comptabilite/balance?du=01/10/2026&au=31/10/2026&journalDu=VEN&journalAu=VEN',
+  );
+  assert.ok(onlyVen.body.some((r) => r.compte === '706000'));
+  assert.ok(onlyVen.body.every((r) => ['411002', '706000'].includes(r.compte)));
+});
