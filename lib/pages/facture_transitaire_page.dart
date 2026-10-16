@@ -884,7 +884,7 @@ class _TransitLineDraft {
   final String numeroConteneur;
   final String marchandise;
   final String typeConteneur;
-  final String transporteurId;
+  String transporteurId;
   final dateDepart = TextEditingController();
   final plaque = TextEditingController();
   final telephone = TextEditingController();
@@ -993,6 +993,7 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
   final _plateText = TextEditingController();
   final _driverPhone = TextEditingController();
   final _search = TextEditingController();
+  final _globalToll = TextEditingController();
   late final TabController _tabs = TabController(length: 2, vsync: this);
   final List<_TransitLineDraft> _lines = [];
   Prestataire? _transitaire;
@@ -1028,6 +1029,22 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
     _observations.text = f.observations;
     _date = _parseFrDate(f.dateEmission) ?? DateTime.now();
     _lines.addAll(f.lignes.map(_TransitLineDraft.new));
+    // Lignes sans transporteur : on le retrouve grâce à la plaque du camion.
+    for (final line in _lines.where((l) => l.transporteurId.isEmpty)) {
+      final plate = _normalizePlate(line.plaque.text);
+      if (plate.isEmpty) continue;
+      final owner = _transporteurs
+          .where(
+            (p) => p.vehicules.any((v) => _normalizePlate(v.plaque) == plate),
+          )
+          .firstOrNull;
+      if (owner != null) line.transporteurId = owner.id;
+    }
+    final tolls = _lines.fold<double>(
+      0,
+      (s, l) => s + (_parseAmount(l.toll.text) ?? 0),
+    );
+    if (tolls > 0) _globalToll.text = tolls.toStringAsFixed(0);
     // Le dernier camion utilisé est repris comme camion courant.
     final last = f.lignes.lastOrNull;
     if (last != null) {
@@ -1047,6 +1064,7 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
   @override
   void dispose() {
     for (final c in [
+      _globalToll,
       _reference,
       _observations,
       _plateText,
@@ -1126,6 +1144,27 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
     ),
   ];
 
+  void _spreadToll() {
+    final total = _parseAmount(_globalToll.text) ?? 0;
+    if (_lines.isEmpty || _globalToll.text.trim().isEmpty) return;
+    final whole = total.round();
+    final share = whole ~/ _lines.length;
+    for (final (i, line) in _lines.indexed) {
+      final value = i == _lines.length - 1
+          ? whole - share * (_lines.length - 1)
+          : share;
+      line.toll.text = value == 0 ? '' : '$value';
+    }
+  }
+
+  void _syncGlobalToll() {
+    final total = _lines.fold<double>(
+      0,
+      (s, l) => s + (_parseAmount(l.toll.text) ?? 0),
+    );
+    _globalToll.text = total == 0 ? '' : total.toStringAsFixed(0);
+  }
+
   void _add(Iterable<_AvailableContainer> containers) {
     final phone = _driverPhone.text.trim();
     setState(() {
@@ -1149,6 +1188,7 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
         );
       }
       _selectedAvailable = null;
+      _spreadToll();
     });
   }
 
@@ -1382,6 +1422,26 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
           _amountText(_truckTransport),
           width: 200,
         ),
+        SizedBox(
+          width: 210,
+          child: TextFormField(
+            key: const ValueKey('transitaire-invoice-global-toll'),
+            controller: _globalToll,
+            textAlign: TextAlign.right,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration:
+                _inputDecoration(
+                  'Frais de péage global',
+                  icon: Icons.toll_rounded,
+                ).copyWith(
+                  suffixText: 'F',
+                  helperText: _lines.isEmpty
+                      ? null
+                      : 'Réparti sur ${_lines.length} conteneur(s)',
+                ),
+            onChanged: (_) => setState(_spreadToll),
+          ),
+        ),
       ],
     );
   }
@@ -1491,8 +1551,8 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
           ('Date de départ', 130),
           ('Numéro conteneur', 150),
           ('Type', 100),
-          ('Transporteur', 140),
-          ('Véhicule', 130),
+          ('Transporteur', 200),
+          ('Véhicule', 190),
           ('Tél. chauffeur', 140),
           ('Frais de transit', 130),
           ('Surestaries / magasinage', 165),
@@ -1512,14 +1572,8 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
               cell(line.dateDepart, hint: 'jj/mm/aaaa'),
               fixed(line.numeroConteneur),
               fixed(line.typeConteneur),
-              fixed(
-                widget.prestataires
-                        .where((p) => p.id == line.transporteurId)
-                        .firstOrNull
-                        ?.entreprise ??
-                    '—',
-              ),
-              cell(line.plaque, key: ValueKey('line-$i-plate')),
+              _carrierCell(i, line),
+              _vehicleCell(i, line),
               cell(line.telephone),
               cell(
                 line.transit,
@@ -1530,11 +1584,15 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
               cell(line.demurrage, hint: '0', amount: true),
               cell(line.volume, hint: '0', amount: true),
               cell(line.other, hint: '0', amount: true),
-              cell(
-                line.toll,
-                hint: '0',
-                amount: true,
+              TextFormField(
                 key: ValueKey('line-$i-toll'),
+                controller: line.toll,
+                textAlign: TextAlign.right,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: _cellDecoration(hint: '0'),
+                onChanged: (_) => setState(_syncGlobalToll),
               ),
               Text(
                 _amountText(line.montant),
@@ -1559,7 +1617,10 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
               ),
               IconButton(
                 tooltip: 'Retirer de la facture',
-                onPressed: () => setState(() => _lines.removeAt(i).dispose()),
+                onPressed: () => setState(() {
+                  _lines.removeAt(i).dispose();
+                  _spreadToll();
+                }),
                 icon: const Icon(
                   Icons.remove_circle_outline_rounded,
                   color: Colors.redAccent,
@@ -1568,6 +1629,67 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
             ],
         ],
       ),
+    );
+  }
+
+  Widget _carrierCell(int i, _TransitLineDraft line) {
+    final current = _transporteurs
+        .where((p) => p.id == line.transporteurId)
+        .firstOrNull;
+    return SearchableDropdownFormField<Prestataire>(
+      key: ValueKey('line-$i-carrier-${line.transporteurId}'),
+      options: _transporteurs,
+      value: current,
+      label: 'Transporteur',
+      emptyText: 'Aucun transporteur',
+      required: false,
+      displayString: (p) => p.entreprise,
+      // Pendant la frappe la sélection est vidée : seul un choix dans la liste compte.
+      onChanged: (p) => setState(() {
+        if (p == null || p.id == line.transporteurId) return;
+        line.transporteurId = p.id;
+        // Un autre transporteur : le camion et le chauffeur sont à choisir.
+        line.plaque.clear();
+        line.telephone.clear();
+      }),
+    );
+  }
+
+  Widget _vehicleCell(int i, _TransitLineDraft line) {
+    final vehicles =
+        _transporteurs
+            .where((p) => p.id == line.transporteurId)
+            .firstOrNull
+            ?.vehicules ??
+        const <Vehicule>[];
+    if (vehicles.isEmpty) {
+      return TextFormField(
+        key: ValueKey('line-$i-plate'),
+        controller: line.plaque,
+        textCapitalization: TextCapitalization.characters,
+        decoration: _cellDecoration(hint: 'Plaque'),
+        onChanged: (_) => setState(() {}),
+      );
+    }
+    final current = vehicles
+        .where(
+          (v) => _normalizePlate(v.plaque) == _normalizePlate(line.plaque.text),
+        )
+        .firstOrNull;
+    return SearchableDropdownFormField<Vehicule>(
+      key: ValueKey('line-$i-vehicle-${line.transporteurId}-${current?.id}'),
+      options: vehicles,
+      value: current,
+      label: 'Véhicule',
+      emptyText: 'Aucun camion',
+      required: false,
+      displayString: (v) => v.plaque,
+      onChanged: (v) => setState(() {
+        if (v == null) return;
+        line.plaque.text = v.plaque;
+        // Le téléphone du chauffeur suit le camion choisi.
+        line.telephone.text = v.telephone;
+      }),
     );
   }
 

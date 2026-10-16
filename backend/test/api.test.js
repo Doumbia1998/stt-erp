@@ -717,3 +717,66 @@ test('the trial balance sums each account and stays balanced', async () => {
   assert.ok(onlyVen.body.some((r) => r.compte === '706000'));
   assert.ok(onlyVen.body.every((r) => ['411002', '706000'].includes(r.compte)));
 });
+
+test('carrier invoices track the truck, the advance and payments', async () => {
+  const invoice = {
+    reference: 'FAC-TRP-1026-0001',
+    transporteurId: 'transp-1',
+    plaque: 'AB 1234 MD',
+    dateEmission: '16/10/2026',
+    observations: 'Voyage Dakar - Bamako',
+    avance: 100000,
+    journalAvance: 'BQ',
+    lignes: [
+      { dossierId: 'd1', bl: 'BL-1', numeroConteneur: 'MSKU1234567', montant: 300000 },
+      { dossierId: 'd5', bl: 'BL-1', numeroConteneur: 'MSKU1234567', montant: 200000 },
+    ],
+    reglements: [],
+  };
+  const created = await call('PUT', '/factures-transporteur/ftp-1', invoice);
+  assert.equal(created.status, 200);
+  assert.equal(created.body.montant, 500000);
+  const twice = await call('PUT', '/factures-transporteur/ftp-2', {
+    ...invoice,
+    reference: 'FAC-TRP-1026-0002',
+    lignes: [invoice.lignes[0]],
+  });
+  assert.equal(twice.status, 409);
+  const tooMuch = await call('PUT', '/factures-transporteur/ftp-1', {
+    ...invoice,
+    version: 1,
+    reglements: [{ id: 'r1', date: '16/10/2026 16:00', montant: 450000, codeJournal: 'BQ' }],
+  });
+  assert.equal(tooMuch.status, 400);
+  const paid = await call('PUT', '/factures-transporteur/ftp-1', {
+    ...invoice,
+    version: 1,
+    reglements: [{ id: 'r1', date: '16/10/2026 16:00', montant: 400000, codeJournal: 'BQ' }],
+  });
+  assert.equal(paid.status, 200);
+  const locked = await call('PUT', '/factures-transporteur/ftp-1', {
+    ...invoice,
+    version: 2,
+    avance: 0,
+    reglements: [{ id: 'r1', date: '16/10/2026 16:00', montant: 400000, codeJournal: 'BQ' }],
+  });
+  assert.equal(locked.status, 409);
+
+  const data = await call('GET', '/donnees');
+  const saved = data.body.facturesTransporteur.find((f) => f.id === 'ftp-1');
+  assert.equal(saved.plaque, 'AB 1234 MD');
+  assert.equal(saved.avance, 100000);
+  assert.equal(saved.lignes.length, 2);
+  assert.equal(saved.reglements[0].montant, 400000);
+
+  await call('POST', '/comptabilite/mise-a-jour', {
+    du: '01/10/2026',
+    au: '31/10/2026',
+    categories: ['achats', 'avances', 'reglements'],
+  });
+  const purchases = await call('GET', '/comptabilite/ecritures?journal=ACH&mois=2026-10');
+  assert.ok(purchases.body.some((l) => l.compte === '611000' && l.debit === 500000));
+  const bank = await call('GET', '/comptabilite/ecritures?journal=BQ&mois=2026-10');
+  assert.ok(bank.body.some((l) => l.piece === 'FAC-TRP-1026-0001' && l.credit === 100000));
+  assert.ok(bank.body.some((l) => l.piece === 'FAC-TRP-1026-0001' && l.credit === 400000));
+});

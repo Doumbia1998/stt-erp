@@ -42,6 +42,7 @@ const uniqueMessages = {
   vehicules_plaque_unique: 'Cette plaque est déjà attribuée à un transporteur.',
   vehicules_pkey: 'Ce camion est déjà enregistré pour un autre transporteur.',
   factures_transitaire_reference_key: 'Ce numéro de facture transitaire existe déjà.',
+  factures_transporteur_reference_key: 'Ce numéro de facture transporteur existe déjà.',
   factures_reference_key: 'Cette référence de facture existe déjà.',
 };
 

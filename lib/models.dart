@@ -687,3 +687,61 @@ class FactureTransitaire {
   double get reliquat => montant - totalRegle;
   bool get estAcquittee => montant > 0 && reliquat <= 0.001;
 }
+
+class FactureTransporteurLigne {
+  String dossierId;
+  String bl;
+  String numeroConteneur;
+  double montant;
+
+  FactureTransporteurLigne({
+    this.dossierId = '',
+    this.bl = '',
+    this.numeroConteneur = '',
+    this.montant = 0,
+  });
+
+  String get cleConteneur => '$dossierId|${numeroConteneur.toUpperCase()}';
+}
+
+// Facture d'un transporteur pour un camion : conteneurs transportés, avance, règlements.
+class FactureTransporteur {
+  final String id;
+  int numero;
+  String reference;
+  String transporteurId;
+  String plaque;
+  String dateEmission;
+  String observations;
+  double avance;
+  String journalAvance;
+  List<FactureTransporteurLigne> lignes;
+  List<ReglementFacture> reglements;
+  int version;
+  String auteur;
+  String dateSaisie;
+
+  FactureTransporteur({
+    required this.id,
+    this.numero = 0,
+    required this.reference,
+    required this.transporteurId,
+    this.plaque = '',
+    required this.dateEmission,
+    this.observations = '',
+    this.avance = 0,
+    this.journalAvance = '',
+    List<FactureTransporteurLigne>? lignes,
+    List<ReglementFacture>? reglements,
+    this.version = 0,
+    this.auteur = '',
+    this.dateSaisie = '',
+  }) : lignes = lignes ?? [],
+       reglements = reglements ?? [];
+
+  double get montant => lignes.fold(0, (s, l) => s + l.montant);
+  double get netAPayer => montant - avance;
+  double get totalRegle => reglements.fold(0, (s, r) => s + r.montant);
+  double get reliquat => netAPayer - totalRegle;
+  bool get estPayee => montant > 0 && reliquat <= 0.001;
+}

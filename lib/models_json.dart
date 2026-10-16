@@ -509,3 +509,74 @@ Map<String, dynamic> factureTransitaireToJson(FactureTransitaire f) => {
       },
   ],
 };
+
+FactureTransporteur factureTransporteurFromJson(Map<String, dynamic> json) =>
+    FactureTransporteur(
+      id: json['id'] as String,
+      numero: (json['numero'] as num?)?.toInt() ?? 0,
+      reference: _str(json['reference']),
+      transporteurId: _str(json['transporteurId']),
+      plaque: _str(json['plaque']),
+      dateEmission: _str(json['dateEmission']),
+      observations: _str(json['observations']),
+      avance: _num(json['avance']),
+      journalAvance: _str(json['journalAvance']),
+      version: (json['version'] as num?)?.toInt() ?? 0,
+      auteur: _str(json['auteur']),
+      dateSaisie: _str(json['dateSaisie']),
+      lignes: [
+        for (final l in (json['lignes'] as List? ?? const []))
+          FactureTransporteurLigne(
+            dossierId: _str(l['dossierId']),
+            bl: _str(l['bl']),
+            numeroConteneur: _str(l['numeroConteneur']),
+            montant: _num(l['montant']),
+          ),
+      ],
+      reglements: [
+        for (final r in (json['reglements'] as List? ?? const []))
+          ReglementFacture(
+            id: r['id'] as String,
+            date: _str(r['date']),
+            montant: _num(r['montant']),
+            codeJournal: _str(r['codeJournal']),
+            modePaiement: _str(r['modePaiement']),
+            numeroCheque: _str(r['numeroCheque']),
+            observations: _str(r['observations']),
+            auteur: _str(r['auteur']),
+            saisiLe: _str(r['saisiLe']),
+          ),
+      ],
+    );
+
+Map<String, dynamic> factureTransporteurToJson(FactureTransporteur f) => {
+  'reference': f.reference,
+  'transporteurId': f.transporteurId,
+  'plaque': f.plaque,
+  'dateEmission': f.dateEmission,
+  'observations': f.observations,
+  'avance': f.avance,
+  'journalAvance': f.journalAvance,
+  'version': f.version,
+  'lignes': [
+    for (final l in f.lignes)
+      {
+        'dossierId': l.dossierId,
+        'bl': l.bl,
+        'numeroConteneur': l.numeroConteneur,
+        'montant': l.montant,
+      },
+  ],
+  'reglements': [
+    for (final r in f.reglements)
+      {
+        'id': r.id,
+        'date': r.date,
+        'montant': r.montant,
+        'codeJournal': r.codeJournal,
+        'modePaiement': r.modePaiement,
+        'numeroCheque': r.numeroCheque,
+        'observations': r.observations,
+      },
+  ],
+};

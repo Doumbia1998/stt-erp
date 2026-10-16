@@ -620,7 +620,29 @@ void main() {
         )..transitaireAffecte = transitaire;
     (erpBackend as MemoryErpBackend)
       ..clients.add(client)
-      ..prestataires.addAll([transitaire, carrier])
+      ..prestataires.addAll([
+        transitaire,
+        carrier,
+        Prestataire(
+          id: 'transp-2',
+          entreprise: 'STL',
+          type: 'Transporteur',
+          pays: 'Mali',
+          villePort: 'Bamako',
+          contact: '',
+          telephone: '',
+          email: '',
+          services: '',
+          vehicules: [
+            Vehicule(
+              id: 'veh-2',
+              plaque: 'BF 5295 MD',
+              chauffeur: 'Issa',
+              telephone: '+223 90 34 12',
+            ),
+          ],
+        ),
+      ])
       ..journaux.add(
         JournalCode(
           code: 'CA',
@@ -714,7 +736,40 @@ void main() {
     }
 
     await type('line-0-transit', '45000');
-    await type('line-0-toll', '5000');
+    // Frais de péage global réparti sur les trois conteneurs.
+    await tester.enterText(
+      find.byKey(const ValueKey('transitaire-invoice-global-toll')),
+      '21000',
+    );
+    await tester.pumpAndSettle();
+    for (var i = 0; i < 3; i++) {
+      expect(
+        tester
+            .widget<TextFormField>(find.byKey(ValueKey('line-$i-toll')))
+            .controller!
+            .text,
+        '7000',
+      );
+    }
+    // Transporteur choisi sur la ligne : sa liste de camions et le téléphone du chauffeur.
+    final carrierField = find.descendant(
+      of: find.byKey(const ValueKey('line-2-carrier-transp-1')),
+      matching: find.byType(TextFormField),
+    );
+    await tester.ensureVisible(carrierField);
+    await tester.enterText(carrierField, 'stl');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('STL').last);
+    await tester.pumpAndSettle();
+    final vehicleField = find.descendant(
+      of: find.byKey(const ValueKey('line-2-vehicle-transp-2-null')),
+      matching: find.byType(TextFormField),
+    );
+    await tester.ensureVisible(vehicleField);
+    await tester.enterText(vehicleField, 'bf');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('BF 5295 MD').last);
+    await tester.pumpAndSettle();
     await type('line-1-transit', '50000');
     await type('line-2-transit', '30000');
     await type('line-0-transport', '300000');
@@ -724,7 +779,7 @@ void main() {
           .widget<Text>(find.byKey(const ValueKey('transitaire-invoice-total')))
           .data!
           .replaceAll(RegExp(r'\D'), ''),
-      '130000',
+      '146000',
     );
     expect(find.textContaining('Avance camion (AB 1234 MD)'), findsOneWidget);
     final reference = tester
@@ -749,7 +804,14 @@ void main() {
       findsOneWidget,
     );
     final saved = (erpBackend as MemoryErpBackend).facturesTransitaire.single;
-    expect(saved.lignes.map((l) => l.plaque).toSet(), {'AB 1234 MD'});
+    expect(saved.lignes.map((l) => l.plaque).toList(), [
+      'AB 1234 MD',
+      'AB 1234 MD',
+      'BF 5295 MD',
+    ]);
+    expect(saved.lignes[2].transporteurId, 'transp-2');
+    expect(saved.lignes[2].telephoneChauffeur, '+223 90 34 12');
+    expect(saved.lignes.map((l) => l.fraisPeage), [7000, 7000, 7000]);
     expect(saved.lignes.first.transporteurId, 'transp-1');
     expect(saved.lignes.first.avanceCamion, 100000);
 
@@ -762,7 +824,11 @@ void main() {
     );
     expect(
       find.descendant(of: lines, matching: find.text('SOSAF')),
-      findsNWidgets(3),
+      findsNWidgets(2),
+    );
+    expect(
+      find.descendant(of: lines, matching: find.text('STL')),
+      findsOneWidget,
     );
 
     await tester.ensureVisible(find.byKey(const ValueKey('payment-new')));
@@ -774,7 +840,7 @@ void main() {
           .widget<TextFormField>(find.byKey(const ValueKey('payment-amount')))
           .controller!
           .text,
-      '130000',
+      '146000',
     );
     await tester.tap(find.byKey(const ValueKey('payment-save')));
     await tester.pumpAndSettle();
@@ -1163,6 +1229,169 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('trial-balance-show')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('trial-balance-grid')), findsOneWidget);
+  });
+
+  testWidgets('Carrier invoice collects the containers of a truck', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 950);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final client = Client(id: 'client-c', nom: 'Client Camion', telephone: '');
+    final carrier = Prestataire(
+      id: 'transp-1',
+      entreprise: 'SOSAF',
+      type: 'Transporteur',
+      pays: 'Mali',
+      villePort: 'Bamako',
+      contact: '',
+      telephone: '',
+      email: '',
+      services: '',
+      vehicules: [
+        Vehicule(
+          id: 'veh-1',
+          plaque: 'AB 1234 MD',
+          chauffeur: 'Moussa',
+          telephone: '70000001',
+        ),
+      ],
+    );
+    final dossier = TransitDossier(
+      id: 'd1',
+      numDossier: 'STT-CAMION',
+      numBL: 'BL-9',
+      numLB: '',
+      client: client,
+      nbConteneurs: 2,
+      dateDebut: '09/10/2026',
+    );
+    FactureTransitaireLigne line(
+      String container,
+      double transport,
+      double advance,
+    ) => FactureTransitaireLigne(
+      dossierId: 'd1',
+      bl: 'BL-9',
+      numeroConteneur: container,
+      transporteurId: 'transp-1',
+      plaque: 'AB 1234 MD',
+      telephoneChauffeur: '70000001',
+      fraisTransit: 10000,
+      montantTransport: transport,
+      avanceCamion: advance,
+    );
+    final backend = erpBackend as MemoryErpBackend;
+    backend
+      ..clients.add(client)
+      ..prestataires.add(carrier)
+      ..dossiers.add(dossier)
+      ..journaux.add(
+        JournalCode(
+          code: 'CA',
+          intitule: 'Caisse principale',
+          type: 'Caisse',
+          compteTresorerie: '571000',
+        ),
+      )
+      ..facturesTransitaire.add(
+        FactureTransitaire(
+          id: 'ftr-1',
+          numero: 1,
+          reference: 'FAC-TRS-1026-0009',
+          transitaireId: 'transit-x',
+          dateEmission: '15/10/2026',
+          lignes: [
+            line('MSKU0000001', 300000, 100000),
+            line('MSKU0000002', 200000, 0),
+          ],
+        ),
+      );
+
+    await tester.pumpWidget(const TransitTrackerApp());
+    await tester.enterText(find.byType(TextField).at(0), 'admin');
+    await tester.enterText(find.byType(TextField).at(1), '1234');
+    await tester.tap(find.text('SE CONNECTER'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Prestation'));
+    await tester.tap(find.byTooltip('Prestation'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Facture Transporteur').last);
+    await tester.pumpAndSettle();
+    expect(
+      find.text('0 facture(s) • 2 conteneur(s) transporté(s) à facturer'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('carrier-invoice-new')));
+    await tester.pumpAndSettle();
+    final partner = find.descendant(
+      of: find.byKey(const ValueKey('carrier-invoice-partner-false')),
+      matching: find.byType(TextFormField),
+    );
+    await tester.enterText(partner, 'sos');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('SOSAF').last);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('carrier-invoice-plate-transp-1-null')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('AB 1234 MD • Moussa').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('carrier-available-add-all')));
+    await tester.pumpAndSettle();
+    expect(find.text('2. Détail de la facture (2)'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextFormField>(
+            find.byKey(const ValueKey('carrier-invoice-advance')),
+          )
+          .controller!
+          .text,
+      '100000',
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('carrier-invoice-net')))
+          .data!
+          .replaceAll(RegExp(r'\D'), ''),
+      '400000',
+    );
+    await tester.tap(find.byKey(const ValueKey('carrier-invoice-validate')));
+    await tester.pumpAndSettle();
+
+    final grid = find.byKey(const ValueKey('carrier-invoices-grid'));
+    Finder inGrid(Finder f) => find.descendant(of: grid, matching: f);
+    expect(inGrid(find.text('AB 1234 MD')), findsOneWidget);
+    expect(inGrid(find.text('MSKU0000002')), findsOneWidget);
+    expect(inGrid(find.text('Non payée')), findsOneWidget);
+    final saved = backend.facturesTransporteur.single;
+    expect(saved.montant, 500000);
+    expect(saved.avance, 100000);
+    expect(saved.plaque, 'AB 1234 MD');
+
+    await tester.tap(inGrid(find.text('AB 1234 MD')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('carrier-payment-new')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('carrier-payment-new')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextFormField>(find.byKey(const ValueKey('payment-amount')))
+          .controller!
+          .text,
+      '400000',
+    );
+    await tester.tap(find.byKey(const ValueKey('payment-save')));
+    await tester.pumpAndSettle();
+    expect(inGrid(find.text('Payée')), findsOneWidget);
+    expect(saved.reliquat, 0);
   });
 
   test('Dossier balances keep the client and provider accounts separate', () {

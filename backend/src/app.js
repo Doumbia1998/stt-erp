@@ -16,6 +16,10 @@ const {
   facturesTransitaireRouter,
   loadFacturesTransitaire,
 } = require('./routes/facturesTransitaire');
+const {
+  facturesTransporteurRouter,
+  loadFacturesTransporteur,
+} = require('./routes/facturesTransporteur');
 const { dossiersRouter, loadDossiers } = require('./routes/dossiers');
 
 function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
@@ -99,7 +103,7 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
   api.get('/donnees', async (req, res, next) => {
     try {
       const [clients, prestataires, comptes, journaux, voyages, dossiers, users, modes, frais,
-        vehicules, facturesTransitaire] =
+        vehicules, facturesTransitaire, facturesTransporteur] =
         await Promise.all([
           pool.query('SELECT * FROM clients ORDER BY cree_le, id'),
           pool.query('SELECT * FROM prestataires ORDER BY cree_le, id'),
@@ -114,6 +118,7 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
           pool.query('SELECT * FROM types_frais ORDER BY lower(libelle)'),
           pool.query('SELECT * FROM vehicules ORDER BY transporteur_id, position'),
           loadFacturesTransitaire(pool),
+          loadFacturesTransporteur(pool),
         ]);
       const vehiculesBy = new Map();
       for (const v of vehicules.rows) {
@@ -133,6 +138,7 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
         modesReglement: modes.rows.map(modeReglementJson),
         typesFrais: frais.rows.map(typeFraisJson),
         facturesTransitaire,
+        facturesTransporteur,
         dossiers,
       });
     } catch (error) {
@@ -144,6 +150,7 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
   api.use(dossiersRouter(pool));
   api.use(comptabiliteRouter(pool));
   api.use(facturesTransitaireRouter(pool));
+  api.use(facturesTransporteurRouter(pool));
   app.use('/api/v1', api);
 
   app.use((_req, res) => {

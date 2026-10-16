@@ -30,6 +30,7 @@ class ErpData {
   final List<ModeReglement> modesReglement;
   final List<TypeFrais> typesFrais;
   final List<FactureTransitaire> facturesTransitaire;
+  final List<FactureTransporteur> facturesTransporteur;
 
   const ErpData({
     required this.user,
@@ -43,6 +44,7 @@ class ErpData {
     this.modesReglement = const [],
     this.typesFrais = const [],
     this.facturesTransitaire = const [],
+    this.facturesTransporteur = const [],
   });
 }
 
@@ -145,6 +147,8 @@ abstract class ErpBackend {
   // Met à jour la version et le numéro de la facture après l'enregistrement.
   Future<void> saveFactureTransitaire(FactureTransitaire facture);
   Future<void> deleteFactureTransitaire(FactureTransitaire facture);
+  Future<void> saveFactureTransporteur(FactureTransporteur facture);
+  Future<void> deleteFactureTransporteur(FactureTransporteur facture);
 
   // Comptabilité générée depuis la gestion.
   Future<MiseAJourResultat> miseAJourComptable({
@@ -254,6 +258,11 @@ class HttpErpBackend implements ErpBackend {
           .cast<Map<String, dynamic>>()
           .map(factureTransitaireFromJson)
           .toList(),
+      facturesTransporteur:
+          ((json['facturesTransporteur'] as List?) ?? const [])
+              .cast<Map<String, dynamic>>()
+              .map(factureTransporteurFromJson)
+              .toList(),
       dossiers: [
         for (final dossier in rows('dossiers'))
           dossierFromJson(
@@ -367,6 +376,22 @@ class HttpErpBackend implements ErpBackend {
   @override
   Future<void> deleteFactureTransitaire(FactureTransitaire facture) =>
       _send('DELETE', '/factures-transitaire/${_segment(facture.id)}');
+
+  @override
+  Future<void> saveFactureTransporteur(FactureTransporteur facture) async {
+    final result = await _send(
+      'PUT',
+      '/factures-transporteur/${_segment(facture.id)}',
+      factureTransporteurToJson(facture),
+    );
+    facture
+      ..version = (result['version'] as num).toInt()
+      ..numero = (result['numero'] as num?)?.toInt() ?? facture.numero;
+  }
+
+  @override
+  Future<void> deleteFactureTransporteur(FactureTransporteur facture) =>
+      _send('DELETE', '/factures-transporteur/${_segment(facture.id)}');
 
   @override
   Future<MiseAJourResultat> miseAJourComptable({
@@ -505,6 +530,7 @@ class MemoryErpBackend implements ErpBackend {
   final List<ModeReglement> modesReglement = [];
   final List<TypeFrais> typesFrais = [];
   final List<FactureTransitaire> facturesTransitaire = [];
+  final List<FactureTransporteur> facturesTransporteur = [];
   final Map<String, String> _passwords = {};
 
   MemoryErpBackend({String adminPassword = '1234'})
@@ -569,6 +595,7 @@ class MemoryErpBackend implements ErpBackend {
       modesReglement: [...modesReglement],
       typesFrais: [...typesFrais],
       facturesTransitaire: [...facturesTransitaire],
+      facturesTransporteur: [...facturesTransporteur],
     );
   }
 
@@ -673,6 +700,29 @@ class MemoryErpBackend implements ErpBackend {
   @override
   Future<void> deleteFactureTransitaire(FactureTransitaire facture) async =>
       facturesTransitaire.removeWhere((f) => f.id == facture.id);
+
+  @override
+  Future<void> saveFactureTransporteur(FactureTransporteur facture) async {
+    final taken = {
+      for (final f in facturesTransporteur)
+        if (f.id != facture.id)
+          for (final l in f.lignes)
+            if (l.numeroConteneur.isNotEmpty) l.cleConteneur,
+    };
+    if (facture.lignes.any((l) => taken.contains(l.cleConteneur))) {
+      throw const ErpBackendException(
+        'Un des conteneurs est déjà facturé dans une autre facture transporteur.',
+        status: 409,
+      );
+    }
+    facture.version += 1;
+    if (facture.numero == 0) facture.numero = facturesTransporteur.length + 1;
+    _upsert(facturesTransporteur, facture, (f) => f.id == facture.id);
+  }
+
+  @override
+  Future<void> deleteFactureTransporteur(FactureTransporteur facture) async =>
+      facturesTransporteur.removeWhere((f) => f.id == facture.id);
 
   // La version en mémoire n'a pas de comptabilité : rien à déverser.
   @override

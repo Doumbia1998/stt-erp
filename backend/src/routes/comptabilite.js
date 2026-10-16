@@ -12,6 +12,7 @@ const COMPTES = {
   achats: '601000',
   transitaires: '401200',
   fraisTransit: '601200',
+  transport: '611000',
   avancesFournisseurs: '409000',
   charges: '638000',
   caisse: '571000',
@@ -189,6 +190,84 @@ async function buildEntries(client, du, au, categories) {
         source: `reglement-transitaire:${r.facture_id}:${r.uid}`,
         lines: [
           { compte: r.compte_comptable || COMPTES.transitaires, libelle: nom, debit: amount, credit: 0 },
+          { compte: treasuryOf(r.code_journal), libelle: r.reference, debit: 0, credit: amount },
+        ],
+      });
+    }
+  }
+
+  // Factures transporteur, avances camion et règlements des transporteurs.
+  const { rows: carrierInvoices } = await client.query(
+    `SELECT f.id, f.reference, f.montant, f.avance, f.journal_avance, f.plaque,
+       f.date_emission, p.entreprise, p.compte_comptable
+     FROM factures_transporteur f LEFT JOIN prestataires p ON p.id = f.transporteur_id
+     WHERE f.montant > 0 AND f.date_emission BETWEEN $1 AND $2`,
+    [du, au],
+  );
+  for (const f of carrierInvoices) {
+    const nom = f.entreprise || 'Transporteur';
+    const compte = f.compte_comptable || COMPTES.fournisseurs;
+    if (wanted.has('achats')) {
+      const amount = round(f.montant);
+      push({
+        journal: JOURNAUX.achats.code,
+        categorie: 'achats',
+        date: f.date_emission,
+        piece: f.reference,
+        libelle: `Transport ${f.reference} • ${nom}${f.plaque ? ` (${f.plaque})` : ''}`,
+        source: `facture-transporteur:${f.id}`,
+        lines: [
+          { compte: COMPTES.transport, libelle: f.reference, debit: amount, credit: 0 },
+          { compte, libelle: nom, debit: 0, credit: amount },
+        ],
+      });
+    }
+    if (wanted.has('avances') && f.avance > 0) {
+      if (!f.journal_avance) {
+        ignored.push(`Avance camion sans caisse (${f.reference})`);
+      } else {
+        const amount = round(f.avance);
+        push({
+          journal: f.journal_avance,
+          categorie: 'avances',
+          date: f.date_emission,
+          piece: f.reference,
+          libelle: `Avance camion ${f.plaque || ''} • ${nom}`,
+          source: `avance-transporteur:${f.id}`,
+          lines: [
+            { compte, libelle: nom, debit: amount, credit: 0 },
+            { compte: treasuryOf(f.journal_avance), libelle: f.reference, debit: 0, credit: amount },
+          ],
+        });
+      }
+    }
+  }
+  if (wanted.has('reglements')) {
+    const { rows: carrierPayments } = await client.query(
+      `SELECT r.facture_id, r.uid, r.montant, r.date::date AS jour, r.code_journal,
+         f.reference, p.entreprise, p.compte_comptable
+       FROM facture_transporteur_reglements r
+       JOIN factures_transporteur f ON f.id = r.facture_id
+       LEFT JOIN prestataires p ON p.id = f.transporteur_id
+       WHERE r.date::date BETWEEN $1 AND $2`,
+      [du, au],
+    );
+    for (const r of carrierPayments) {
+      if (!r.code_journal) {
+        ignored.push(`Règlement transporteur sans caisse (${r.reference})`);
+        continue;
+      }
+      const amount = round(r.montant);
+      const nom = r.entreprise || 'Transporteur';
+      push({
+        journal: r.code_journal,
+        categorie: 'reglements',
+        date: r.jour,
+        piece: r.reference,
+        libelle: `Règlement ${nom} • ${r.reference}`,
+        source: `reglement-transporteur:${r.facture_id}:${r.uid}`,
+        lines: [
+          { compte: r.compte_comptable || COMPTES.fournisseurs, libelle: nom, debit: amount, credit: 0 },
           { compte: treasuryOf(r.code_journal), libelle: r.reference, debit: 0, credit: amount },
         ],
       });

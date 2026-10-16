@@ -24,6 +24,7 @@ part 'pages/comptabilite_pages.dart';
 part 'pages/dossier_dialogs.dart';
 part 'pages/dossiers_page.dart';
 part 'pages/facture_transitaire_page.dart';
+part 'pages/facture_transporteur_page.dart';
 part 'pages/frais_caisse_pages.dart';
 part 'pages/transporteurs_page.dart';
 part 'widgets/erp_documents.dart';
@@ -121,6 +122,7 @@ final List<Voyage> _voyages = [];
 final List<ModeReglement> _modesReglement = [];
 final List<TypeFrais> _typesFrais = [];
 final List<FactureTransitaire> _facturesTransitaire = [];
+final List<FactureTransporteur> _facturesTransporteur = [];
 
 void _loadErpData(ErpData data) {
   _currentUser = data.user;
@@ -154,6 +156,9 @@ void _loadErpData(ErpData data) {
   _facturesTransitaire
     ..clear()
     ..addAll(data.facturesTransitaire);
+  _facturesTransporteur
+    ..clear()
+    ..addAll(data.facturesTransporteur);
 }
 
 class TransitTrackerApp extends StatelessWidget {
@@ -854,11 +859,13 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           factures: _facturesTransitaire,
         );
       case 'Facture Transporteur':
-        return DossierInvoicesPage(
+        return FactureTransporteurPage(
           dossiers: _dossiers,
-          kind: DossierInvoiceKind.carrier,
           prestataires: _prestataires,
-          userDisplayName: widget.userDisplayName,
+          journals: _journalCodes,
+          modes: _modesReglement,
+          facturesTransitaire: _facturesTransitaire,
+          factures: _facturesTransporteur,
         );
       case 'Transporteurs':
         return TransporteursPage(
