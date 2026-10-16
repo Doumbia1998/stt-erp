@@ -713,6 +713,8 @@ class FactureTransporteur {
   String plaque;
   String dateEmission;
   String observations;
+  // Total TTC (somme des conteneurs ou prix convenu avec le transporteur).
+  double montant;
   double avance;
   String journalAvance;
   List<FactureTransporteurLigne> lignes;
@@ -729,6 +731,7 @@ class FactureTransporteur {
     this.plaque = '',
     required this.dateEmission,
     this.observations = '',
+    this.montant = 0,
     this.avance = 0,
     this.journalAvance = '',
     List<FactureTransporteurLigne>? lignes,
@@ -739,7 +742,6 @@ class FactureTransporteur {
   }) : lignes = lignes ?? [],
        reglements = reglements ?? [];
 
-  double get montant => lignes.fold(0, (s, l) => s + l.montant);
   double get netAPayer => montant - avance;
   double get totalRegle => reglements.fold(0, (s, r) => s + r.montant);
   double get reliquat => netAPayer - totalRegle;

@@ -78,8 +78,14 @@ function parseFacture(b) {
     numeroConteneur: text(l, 'numeroConteneur').toUpperCase(),
     montant: amount(l, 'montant', { min: 0 }),
   }));
-  if (lignes.length === 0) throw badRequest('La facture doit contenir au moins un conteneur.');
-  const montant = round(lignes.reduce((s, l) => s + l.montant, 0));
+  // Total TTC saisi (prix convenu) ; à défaut, la somme des conteneurs.
+  const montant =
+    b.montant === undefined || b.montant === null
+      ? round(lignes.reduce((s, l) => s + l.montant, 0))
+      : amount(b, 'montant', { min: 0 });
+  if (lignes.length === 0 && montant <= 0) {
+    throw badRequest('Indiquez le Total TTC ou ajoutez au moins un conteneur.');
+  }
   const avance = amount(b, 'avance', { min: 0 });
   if (avance > montant + 0.001) {
     throw badRequest('L’avance camion dépasse le montant de la facture.');

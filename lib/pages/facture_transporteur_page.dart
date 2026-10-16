@@ -629,7 +629,24 @@ class _FactureTransporteurPageState extends State<FactureTransporteurPage> {
       );
       return;
     }
-    await _openEditor(facture);
+    final result = await showDialog<Object?>(
+      context: context,
+      builder: (context) => _FactureTransporteurQuickEdit(
+        facture: facture,
+        prestataires: widget.prestataires,
+        factures: widget.factures,
+      ),
+    );
+    if (!mounted) return;
+    if (result == _openContainers) {
+      await _openEditor(facture);
+    } else if (result is FactureTransporteur) {
+      setState(() {
+        final index = widget.factures.indexWhere((f) => f.id == result.id);
+        if (index >= 0) widget.factures[index] = result;
+        _selected = result;
+      });
+    }
   }
 
   Future<void> _openEditor(FactureTransporteur? facture) async {
@@ -945,6 +962,9 @@ class _FactureTransporteurEditorState extends State<_FactureTransporteurEditor>
   final _reference = TextEditingController();
   final _observations = TextEditingController();
   final _advance = TextEditingController();
+  final _totalCtrl = TextEditingController();
+  // Vrai dès que l'utilisateur saisit lui-même le Total TTC.
+  bool _manualTotal = false;
   late final TabController _tabs = TabController(length: 2, vsync: this);
   final List<_CarrierLineDraft> _lines = [];
   Prestataire? _transporteur;
@@ -979,6 +999,9 @@ class _FactureTransporteurEditorState extends State<_FactureTransporteurEditor>
     _reference.text = f.reference;
     _observations.text = f.observations;
     _advance.text = f.avance == 0 ? '' : f.avance.toStringAsFixed(0);
+    _totalCtrl.text = f.montant == 0 ? '' : f.montant.toStringAsFixed(0);
+    final linesSum = f.lignes.fold<double>(0, (s, l) => s + l.montant);
+    _manualTotal = (linesSum - f.montant).abs() > 0.5;
     if (widget.journals.any((j) => j.code == f.journalAvance)) {
       _advanceJournal = f.journalAvance;
     }
@@ -997,7 +1020,7 @@ class _FactureTransporteurEditorState extends State<_FactureTransporteurEditor>
 
   @override
   void dispose() {
-    for (final c in [_reference, _observations, _advance]) {
+    for (final c in [_reference, _observations, _advance, _totalCtrl]) {
       c.dispose();
     }
     _tabs.dispose();
@@ -1008,7 +1031,15 @@ class _FactureTransporteurEditorState extends State<_FactureTransporteurEditor>
   }
 
   String get _plate => _vehicule?.plaque ?? '';
-  double get _total => _lines.fold(0, (s, l) => s + l.value);
+  double get _linesTotal => _lines.fold(0, (s, l) => s + l.value);
+  double get _total => _parseAmount(_totalCtrl.text) ?? 0;
+
+  void _syncTotal() {
+    if (_manualTotal) return;
+    final sum = _linesTotal;
+    _totalCtrl.text = sum == 0 ? '' : sum.toStringAsFixed(0);
+  }
+
   double get _advanceValue => _parseAmount(_advance.text) ?? 0;
 
   List<_CarriedContainer> get _available {
@@ -1092,6 +1123,7 @@ class _FactureTransporteurEditorState extends State<_FactureTransporteurEditor>
     // L'avance camion saisie dans la facture transitaire est reprise.
     _advance.text = advance == 0 ? '' : advance.toStringAsFixed(0);
     _selectedAvailable = null;
+    _syncTotal();
   });
 
   @override
@@ -1266,7 +1298,28 @@ class _FactureTransporteurEditorState extends State<_FactureTransporteurEditor>
                           onChanged: (v) => setState(() => _advanceJournal = v),
                         ),
                       ),
-                      _infoTile('Total TTC', _amountText(_total), width: 170),
+                      SizedBox(
+                        width: 190,
+                        child: TextFormField(
+                          key: const ValueKey('carrier-invoice-total'),
+                          controller: _totalCtrl,
+                          textAlign: TextAlign.right,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration:
+                              _inputDecoration(
+                                'Total TTC',
+                                icon: Icons.receipt_long_outlined,
+                              ).copyWith(
+                                suffixText: 'F',
+                                helperText: _manualTotal && _lines.isNotEmpty
+                                    ? 'Conteneurs : ${formatCurrency(_linesTotal)}'
+                                    : null,
+                              ),
+                          onChanged: (_) => setState(() => _manualTotal = true),
+                        ),
+                      ),
                       _infoTile(
                         'Net à payer',
                         _amountText(_total - _advanceValue),
@@ -1378,7 +1431,7 @@ class _FactureTransporteurEditorState extends State<_FactureTransporteurEditor>
                                         decimal: true,
                                       ),
                                   decoration: _cellDecoration(hint: '0'),
-                                  onChanged: (_) => setState(() {}),
+                                  onChanged: (_) => setState(_syncTotal),
                                 ),
                                 IconButton(
                                   tooltip: 'Retirer de la facture',
@@ -1390,6 +1443,7 @@ class _FactureTransporteurEditorState extends State<_FactureTransporteurEditor>
                                         ? ''
                                         : advance.toStringAsFixed(0);
                                     removed.montant.dispose();
+                                    _syncTotal();
                                   }),
                                   icon: const Icon(
                                     Icons.remove_circle_outline_rounded,
@@ -1443,10 +1497,12 @@ class _FactureTransporteurEditorState extends State<_FactureTransporteurEditor>
     String? problem;
     if (carrier == null) {
       problem = 'Choisissez le transporteur.';
-    } else if (_lines.isEmpty) {
-      problem = 'Ajoutez au moins un conteneur transporté.';
+    } else if (_lines.isEmpty && _total <= 0) {
+      problem =
+          'Ajoutez au moins un conteneur transporté ou saisissez le Total TTC.';
     } else if (_lines.any((l) => (_parseAmount(l.montant.text) ?? -1) < 0) ||
         _parseAmount(_advance.text) == null ||
+        _parseAmount(_totalCtrl.text) == null ||
         _advanceValue < 0) {
       problem = 'Vérifiez les montants saisis.';
     } else if (_advanceValue > _total + 0.001) {
@@ -1469,6 +1525,7 @@ class _FactureTransporteurEditorState extends State<_FactureTransporteurEditor>
       plaque: _plate.isNotEmpty ? _plate : (initial?.plaque ?? ''),
       dateEmission: DateFormat('dd/MM/yyyy').format(_date),
       observations: _observations.text.trim(),
+      montant: _total,
       avance: _advanceValue,
       journalAvance: _advanceJournal ?? '',
       lignes: [
@@ -1498,5 +1555,259 @@ class _FactureTransporteurEditorState extends State<_FactureTransporteurEditor>
       return;
     }
     Navigator.pop(context, facture);
+  }
+}
+
+const _openContainers = 'conteneurs';
+
+// « Modifier » : transporteur, plaque, date, Total TTC, avance et observations.
+class _FactureTransporteurQuickEdit extends StatefulWidget {
+  final FactureTransporteur facture;
+  final List<Prestataire> prestataires;
+  final List<FactureTransporteur> factures;
+
+  const _FactureTransporteurQuickEdit({
+    required this.facture,
+    required this.prestataires,
+    required this.factures,
+  });
+
+  @override
+  State<_FactureTransporteurQuickEdit> createState() =>
+      _FactureTransporteurQuickEditState();
+}
+
+class _FactureTransporteurQuickEditState
+    extends State<_FactureTransporteurQuickEdit> {
+  final _formKey = GlobalKey<FormState>();
+  final _plate = TextEditingController();
+  final _total = TextEditingController();
+  final _advance = TextEditingController();
+  final _observations = TextEditingController();
+  Prestataire? _carrier;
+  DateTime _date = DateTime.now();
+  bool _saving = false;
+
+  List<Prestataire> get _carriers =>
+      widget.prestataires.where((p) => p.type == 'Transporteur').toList();
+
+  @override
+  void initState() {
+    super.initState();
+    final f = widget.facture;
+    _carrier = _carriers.where((p) => p.id == f.transporteurId).firstOrNull;
+    _plate.text = f.plaque;
+    _total.text = f.montant == 0 ? '' : f.montant.toStringAsFixed(0);
+    _advance.text = f.avance == 0 ? '' : f.avance.toStringAsFixed(0);
+    _observations.text = f.observations;
+    _date = _parseFrDate(f.dateEmission) ?? DateTime.now();
+  }
+
+  @override
+  void dispose() {
+    for (final c in [_plate, _total, _advance, _observations]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final vehicles = _carrier?.vehicules ?? const <Vehicule>[];
+    return AlertDialog(
+      clipBehavior: Clip.antiAlias,
+      titlePadding: EdgeInsets.zero,
+      title: _dialogHeader(
+        icon: Icons.local_shipping_rounded,
+        title: 'Modifier la facture transporteur',
+        subtitle: widget.facture.reference,
+        onClose: () => Navigator.pop(context),
+      ),
+      content: SizedBox(
+        width: 520,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SearchableDropdownFormField<Prestataire>(
+                  key: const ValueKey('quick-carrier'),
+                  options: _carriers,
+                  value: _carrier,
+                  label: 'Transporteur *',
+                  emptyText: 'Aucun transporteur',
+                  displayString: (p) => p.entreprise,
+                  onChanged: (p) => setState(() {
+                    if (p == null || p.id == _carrier?.id) return;
+                    _carrier = p;
+                    _plate.clear();
+                  }),
+                ),
+                const SizedBox(height: 12),
+                if (vehicles.isEmpty)
+                  TextFormField(
+                    key: const ValueKey('quick-plate'),
+                    controller: _plate,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: _inputDecoration(
+                      'Plaque véhicule',
+                      icon: Icons.local_shipping_outlined,
+                    ),
+                  )
+                else
+                  DropdownButtonFormField<String>(
+                    key: ValueKey('quick-plate-${_carrier?.id}'),
+                    isExpanded: true,
+                    initialValue: vehicles.any((v) => v.plaque == _plate.text)
+                        ? _plate.text
+                        : null,
+                    decoration: _inputDecoration(
+                      'Plaque véhicule',
+                      icon: Icons.local_shipping_outlined,
+                    ),
+                    items: [
+                      for (final v in vehicles)
+                        DropdownMenuItem(
+                          value: v.plaque,
+                          child: Text(
+                            v.chauffeur.isEmpty
+                                ? v.plaque
+                                : '${v.plaque} • ${v.chauffeur}',
+                          ),
+                        ),
+                    ],
+                    onChanged: (v) => setState(() => _plate.text = v ?? ''),
+                  ),
+                const SizedBox(height: 12),
+                _FormDateField(
+                  label: 'Date de facture',
+                  value: _date,
+                  clearable: false,
+                  onChanged: (d) => setState(() => _date = d ?? _date),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        key: const ValueKey('quick-total'),
+                        controller: _total,
+                        textAlign: TextAlign.right,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: _inputDecoration(
+                          'Total TTC *',
+                          icon: Icons.receipt_long_outlined,
+                        ).copyWith(suffixText: 'F'),
+                        validator: (value) {
+                          final amount = _parseAmount(value ?? '');
+                          if (amount == null || amount <= 0) {
+                            return 'Montant invalide';
+                          }
+                          return null;
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        key: const ValueKey('quick-advance'),
+                        controller: _advance,
+                        textAlign: TextAlign.right,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: _inputDecoration(
+                          'Avance camion',
+                          icon: Icons.local_gas_station_outlined,
+                        ).copyWith(suffixText: 'F'),
+                        validator: (value) {
+                          final advance = _parseAmount(value ?? '');
+                          final total = _parseAmount(_total.text) ?? 0;
+                          if (advance == null || advance < 0) {
+                            return 'Montant invalide';
+                          }
+                          return advance > total ? 'Dépasse le total' : null;
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _observations,
+                  maxLines: 3,
+                  decoration: _inputDecoration(
+                    'Observations',
+                    icon: Icons.notes_rounded,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    key: const ValueKey('quick-containers'),
+                    onPressed: () => Navigator.pop(context, _openContainers),
+                    icon: const Icon(Icons.view_list_rounded),
+                    label: Text(
+                      'Conteneurs de la facture (${widget.facture.lignes.length})…',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Annuler'),
+        ),
+        FilledButton.icon(
+          key: const ValueKey('quick-save'),
+          onPressed: _saving ? null : _save,
+          icon: const Icon(Icons.check_rounded),
+          label: const Text('Valider'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    final carrier = _carrier;
+    if (carrier == null) return;
+    final f = widget.facture;
+    final updated = FactureTransporteur(
+      id: f.id,
+      numero: f.numero,
+      reference: f.reference,
+      transporteurId: carrier.id,
+      plaque: _plate.text.trim().toUpperCase(),
+      dateEmission: DateFormat('dd/MM/yyyy').format(_date),
+      observations: _observations.text.trim(),
+      montant: _parseAmount(_total.text) ?? 0,
+      avance: _parseAmount(_advance.text) ?? 0,
+      journalAvance: f.journalAvance,
+      lignes: f.lignes,
+      reglements: f.reglements,
+      version: f.version,
+      auteur: f.auteur,
+      dateSaisie: f.dateSaisie,
+    );
+    setState(() => _saving = true);
+    final saved = await _persist(
+      context,
+      () => erpBackend.saveFactureTransporteur(updated),
+    );
+    if (!mounted) return;
+    if (!saved) {
+      setState(() => _saving = false);
+      return;
+    }
+    Navigator.pop(context, updated);
   }
 }

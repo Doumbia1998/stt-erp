@@ -780,3 +780,28 @@ test('carrier invoices track the truck, the advance and payments', async () => {
   assert.ok(bank.body.some((l) => l.piece === 'FAC-TRP-1026-0001' && l.credit === 100000));
   assert.ok(bank.body.some((l) => l.piece === 'FAC-TRP-1026-0001' && l.credit === 400000));
 });
+
+test('a carrier invoice can carry an agreed total without containers', async () => {
+  const created = await call('PUT', '/factures-transporteur/ftp-3', {
+    reference: 'FAC-TRP-1026-0003',
+    transporteurId: 'transp-1',
+    plaque: 'AC 5678 MD',
+    dateEmission: '16/10/2026',
+    montant: 2400000,
+    avance: 0,
+    lignes: [],
+    reglements: [],
+  });
+  assert.equal(created.status, 200);
+  assert.equal(created.body.montant, 2400000);
+  const empty = await call('PUT', '/factures-transporteur/ftp-4', {
+    reference: 'FAC-TRP-1026-0004',
+    transporteurId: 'transp-1',
+    dateEmission: '16/10/2026',
+    montant: 0,
+    lignes: [],
+  });
+  assert.equal(empty.status, 400);
+  const data = await call('GET', '/donnees');
+  assert.equal(data.body.facturesTransporteur.find((f) => f.id === 'ftp-3').montant, 2400000);
+});

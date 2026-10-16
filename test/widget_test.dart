@@ -1375,6 +1375,16 @@ void main() {
     await tester.tap(inGrid(find.text('AB 1234 MD')));
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pumpAndSettle();
+    // « Modifier » : fenêtre compacte, Total TTC saisi (prix convenu).
+    await tester.tap(find.byKey(const ValueKey('carrier-invoice-edit')));
+    await tester.pumpAndSettle();
+    expect(find.text('Modifier la facture transporteur'), findsOneWidget);
+    await tester.enterText(find.byKey(const ValueKey('quick-total')), '550000');
+    await tester.tap(find.byKey(const ValueKey('quick-save')));
+    await tester.pumpAndSettle();
+    final edited = backend.facturesTransporteur.single;
+    expect(edited.montant, 550000);
+    expect(edited.lignes.length, 2);
     await tester.ensureVisible(
       find.byKey(const ValueKey('carrier-payment-new')),
     );
@@ -1386,12 +1396,12 @@ void main() {
           .widget<TextFormField>(find.byKey(const ValueKey('payment-amount')))
           .controller!
           .text,
-      '400000',
+      '450000',
     );
     await tester.tap(find.byKey(const ValueKey('payment-save')));
     await tester.pumpAndSettle();
     expect(inGrid(find.text('Payée')), findsOneWidget);
-    expect(saved.reliquat, 0);
+    expect(edited.reliquat, 0);
   });
 
   test('Dossier balances keep the client and provider accounts separate', () {
