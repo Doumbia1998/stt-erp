@@ -21,8 +21,8 @@ List<_CarriedContainer> _carriedContainers(
   final taken = {
     for (final f in carrierInvoices)
       if (f.id != exceptFactureId)
-        for (final l in f.lignes)
-          if (l.numeroConteneur.isNotEmpty) l.cleConteneur,
+        // Un BL sans numéro de conteneur compte aussi : il n'est proposé qu'une fois.
+        for (final l in f.lignes) l.cleConteneur,
   };
   return [
     for (final f in transitInvoices)

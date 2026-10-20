@@ -680,7 +680,11 @@ void main() {
       );
       await tester.enterText(field, query);
       await tester.pumpAndSettle();
-      await tester.tap(find.text(option).last);
+      await tester.tap(
+        find
+            .descendant(of: find.byType(ListTile), matching: find.text(option))
+            .last,
+      );
       await tester.pumpAndSettle();
     }
 
@@ -689,13 +693,12 @@ void main() {
       'bou',
       'BOUARE',
     );
-    await pick(const ValueKey('transitaire-invoice-carrier'), 'sos', 'SOSAF');
-    await tester.tap(
-      find.byKey(const ValueKey('transitaire-invoice-plate-transp-1')),
+    // La plaque saisie remplit le transporteur et le téléphone du chauffeur.
+    await pick(
+      const ValueKey('transitaire-invoice-plate-null'),
+      'ab 12',
+      'AB 1234 MD • Moussa • SOSAF',
     );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('AB 1234 MD • Moussa').last);
-    await tester.pumpAndSettle();
     expect(
       tester
           .widget<TextFormField>(
@@ -705,29 +708,29 @@ void main() {
           .text,
       '70000001',
     );
+    expect(
+      find.byKey(const ValueKey('transitaire-invoice-carrier-transp-1')),
+      findsOneWidget,
+    );
 
+    // Un clic sur une ligne l'ajoute au détail ; « Tout ajouter » prend le reste.
     final available = find.byKey(const ValueKey('available-containers-grid'));
     await tester.tap(
       find.descendant(of: available, matching: find.text('MSKU0000001')),
     );
-    // Laisse passer le délai du double-clic avant que la sélection soit prise en compte.
-    await tester.pump(const Duration(milliseconds: 400));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('available-add-bl')));
-    await tester.pumpAndSettle();
-    await tester.tap(
-      find.descendant(of: available, matching: find.text('TCLU0000003')),
-    );
-    // Laisse passer le délai du double-clic avant que la sélection soit prise en compte.
-    await tester.pump(const Duration(milliseconds: 400));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('available-add')));
+    expect(find.text('2. Détail de la facture (1)'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('available-add-all')));
     await tester.pumpAndSettle();
     expect(find.text('2. Détail de la facture (3)'), findsOneWidget);
     expect(find.text('1. Liste des BL disponibles (0)'), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('tab-details')));
-    await tester.pumpAndSettle();
+    // Changer de camion en en-tête s'applique à tous les conteneurs.
+    await pick(
+      const ValueKey('transitaire-invoice-plate-veh-1'),
+      'bf',
+      'BF 5295 MD • Issa • STL',
+    );
     Future<void> type(String key, String value) async {
       final field = find.byKey(ValueKey(key));
       await tester.ensureVisible(field);
@@ -735,45 +738,28 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    await type('line-0-transit', '45000');
-    // Frais de péage global réparti sur les trois conteneurs.
-    await tester.enterText(
-      find.byKey(const ValueKey('transitaire-invoice-global-toll')),
-      '21000',
-    );
+    // Péage, total transporteur et avance répartis sur les trois conteneurs.
+    await type('transitaire-invoice-global-toll', '21000');
+    await type('transitaire-invoice-truck-total', '300000');
+    await type('transitaire-invoice-truck-advance', '90000');
+    await tester.tap(find.byKey(const ValueKey('tab-details')));
     await tester.pumpAndSettle();
+    String cellText(String key) => tester
+        .widget<TextFormField>(find.byKey(ValueKey(key)))
+        .controller!
+        .text;
     for (var i = 0; i < 3; i++) {
+      expect(cellText('line-$i-toll'), '7000');
+      expect(cellText('line-$i-transport'), '100000');
+      expect(cellText('line-$i-advance'), '30000');
       expect(
-        tester
-            .widget<TextFormField>(find.byKey(ValueKey('line-$i-toll')))
-            .controller!
-            .text,
-        '7000',
+        tester.widget<Text>(find.byKey(ValueKey('line-$i-truck'))).data,
+        'STL • BF 5295 MD',
       );
     }
-    // Transporteur choisi sur la ligne : sa liste de camions et le téléphone du chauffeur.
-    final carrierField = find.descendant(
-      of: find.byKey(const ValueKey('line-2-carrier-transp-1')),
-      matching: find.byType(TextFormField),
-    );
-    await tester.ensureVisible(carrierField);
-    await tester.enterText(carrierField, 'stl');
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('STL').last);
-    await tester.pumpAndSettle();
-    final vehicleField = find.descendant(
-      of: find.byKey(const ValueKey('line-2-vehicle-transp-2-null')),
-      matching: find.byType(TextFormField),
-    );
-    await tester.ensureVisible(vehicleField);
-    await tester.enterText(vehicleField, 'bf');
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('BF 5295 MD').last);
-    await tester.pumpAndSettle();
+    await type('line-0-transit', '45000');
     await type('line-1-transit', '50000');
     await type('line-2-transit', '30000');
-    await type('line-0-transport', '300000');
-    await type('line-0-advance', '100000');
     expect(
       tester
           .widget<Text>(find.byKey(const ValueKey('transitaire-invoice-total')))
@@ -781,7 +767,7 @@ void main() {
           .replaceAll(RegExp(r'\D'), ''),
       '146000',
     );
-    expect(find.textContaining('Avance camion (AB 1234 MD)'), findsOneWidget);
+    expect(find.textContaining('Avance camion (BF 5295 MD)'), findsOneWidget);
     final reference = tester
         .widget<TextFormField>(
           find.byKey(const ValueKey('transitaire-invoice-number')),
@@ -804,16 +790,16 @@ void main() {
       findsOneWidget,
     );
     final saved = (erpBackend as MemoryErpBackend).facturesTransitaire.single;
-    expect(saved.lignes.map((l) => l.plaque).toList(), [
-      'AB 1234 MD',
-      'AB 1234 MD',
-      'BF 5295 MD',
-    ]);
-    expect(saved.lignes[2].transporteurId, 'transp-2');
+    expect(saved.lignes.map((l) => l.plaque).toSet(), {'BF 5295 MD'});
+    expect(saved.lignes.map((l) => l.transporteurId).toSet(), {'transp-2'});
     expect(saved.lignes[2].telephoneChauffeur, '+223 90 34 12');
     expect(saved.lignes.map((l) => l.fraisPeage), [7000, 7000, 7000]);
-    expect(saved.lignes.first.transporteurId, 'transp-1');
-    expect(saved.lignes.first.avanceCamion, 100000);
+    expect(saved.lignes.map((l) => l.montantTransport), [
+      100000,
+      100000,
+      100000,
+    ]);
+    expect(saved.lignes.first.avanceCamion, 30000);
 
     await tester.tap(inInvoices(find.text(reference)));
     await tester.pumpAndSettle();
@@ -823,12 +809,8 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.descendant(of: lines, matching: find.text('SOSAF')),
-      findsNWidgets(2),
-    );
-    expect(
       find.descendant(of: lines, matching: find.text('STL')),
-      findsOneWidget,
+      findsNWidgets(3),
     );
 
     await tester.ensureVisible(find.byKey(const ValueKey('payment-new')));

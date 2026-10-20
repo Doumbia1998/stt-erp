@@ -12,7 +12,7 @@ const _paymentModes = [
   'Mobile Money',
 ];
 
-// Conteneur d'un dossier que son transitaire peut encore facturer.
+// Conteneur d'un dossier encore à facturer (conteneur vide : BL dont les conteneurs ne sont pas saisis).
 class _AvailableContainer {
   final TransitDossier dossier;
   final TransitContainer container;
@@ -22,26 +22,43 @@ class _AvailableContainer {
   String get cle => '${dossier.id}|${container.numero.toUpperCase()}';
 }
 
+// Tous les BL des dossiers ouverts qui ne sont pas encore facturés, quel que soit le transitaire.
 List<_AvailableContainer> _availableContainers(
   List<TransitDossier> dossiers,
-  List<FactureTransitaire> factures,
-  String transitaireId, {
+  List<FactureTransitaire> factures, {
   String? exceptFactureId,
 }) {
   final taken = {
     for (final f in factures)
       if (f.id != exceptFactureId)
-        for (final l in f.lignes)
-          if (l.numeroConteneur.isNotEmpty) l.cleConteneur,
+        for (final l in f.lignes) l.cleConteneur,
   };
-  return [
-    for (final d in dossiers)
-      if (d.transitaireAffecte?.id == transitaireId && !d.estCloture)
-        for (final c in d.conteneurs)
-          if (c.numero.isNotEmpty &&
-              !taken.contains('${d.id}|${c.numero.toUpperCase()}'))
-            _AvailableContainer(d, c),
-  ];
+  final result = <_AvailableContainer>[];
+  for (final d in dossiers) {
+    if (d.estCloture) continue;
+    final numbered = d.conteneurs.where((c) => c.numero.trim().isNotEmpty);
+    if (numbered.isEmpty) {
+      if (d.numBL.trim().isNotEmpty && !taken.contains('${d.id}|')) {
+        result.add(
+          _AvailableContainer(
+            d,
+            TransitContainer(
+              numero: '',
+              type: '',
+              marchandise: d.typeMarchandise,
+            ),
+          ),
+        );
+      }
+      continue;
+    }
+    for (final c in numbered) {
+      if (!taken.contains('${d.id}|${c.numero.toUpperCase()}')) {
+        result.add(_AvailableContainer(d, c));
+      }
+    }
+  }
+  return result;
 }
 
 // Raison empêchant de clôturer un dossier côté transitaire (null si rien ne bloque).
@@ -123,17 +140,8 @@ class _FactureTransitairePageState extends State<FactureTransitairePage> {
     }).toList();
   }
 
-  int get _pendingContainers {
-    final transitaires = _transitaire == null
-        ? widget.prestataires.where((p) => p.type == 'Transitaire')
-        : [_transitaire!];
-    return transitaires.fold(
-      0,
-      (sum, t) =>
-          sum +
-          _availableContainers(widget.dossiers, widget.factures, t.id).length,
-    );
-  }
+  int get _pendingContainers =>
+      _availableContainers(widget.dossiers, widget.factures).length;
 
   late final List<ErpGridColumn<FactureTransitaire>> _invoiceColumns = [
     ErpGridColumn(
@@ -994,13 +1002,14 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
   final _driverPhone = TextEditingController();
   final _search = TextEditingController();
   final _globalToll = TextEditingController();
+  final _truckTotal = TextEditingController();
+  final _truckAdvance = TextEditingController();
   late final TabController _tabs = TabController(length: 2, vsync: this);
   final List<_TransitLineDraft> _lines = [];
   Prestataire? _transitaire;
   Prestataire? _transporteur;
   Vehicule? _vehicule;
   DateTime _date = DateTime.now();
-  _AvailableContainer? _selectedAvailable;
   bool _saving = false;
 
   List<Prestataire> get _transitaires =>
@@ -1045,6 +1054,7 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
       (s, l) => s + (_parseAmount(l.toll.text) ?? 0),
     );
     if (tolls > 0) _globalToll.text = tolls.toStringAsFixed(0);
+    _syncTruckAmounts();
     // Le dernier camion utilisé est repris comme camion courant.
     final last = f.lignes.lastOrNull;
     if (last != null) {
@@ -1065,6 +1075,8 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
   void dispose() {
     for (final c in [
       _globalToll,
+      _truckTotal,
+      _truckAdvance,
       _reference,
       _observations,
       _plateText,
@@ -1083,35 +1095,33 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
   String get _currentPlate => (_vehicule?.plaque ?? _plateText.text).trim();
 
   List<_AvailableContainer> get _available {
-    final transitaire = _transitaire;
-    if (transitaire == null) return const [];
     final inInvoice = _lines.map((l) => l.cle).toSet();
     final query = _search.text.trim().toLowerCase();
-    return _availableContainers(
-      widget.dossiers,
-      widget.factures,
-      transitaire.id,
-      exceptFactureId: widget.initial?.id,
-    ).where((a) {
-      if (inInvoice.contains(a.cle)) return false;
-      if (query.isEmpty) return true;
-      return '${a.dossier.numBL} ${a.container.numero} ${a.dossier.numDossier} ${a.dossier.client.nom} ${a.container.marchandise}'
-          .toLowerCase()
-          .contains(query);
-    }).toList();
+    final rows =
+        _availableContainers(
+          widget.dossiers,
+          widget.factures,
+          exceptFactureId: widget.initial?.id,
+        ).where((a) {
+          if (inInvoice.contains(a.cle)) return false;
+          if (query.isEmpty) return true;
+          return '${a.dossier.numBL} ${a.container.numero} ${a.dossier.numDossier} ${a.dossier.client.nom} ${a.container.marchandise} ${a.dossier.transitaireAffecte?.entreprise ?? ''}'
+              .toLowerCase()
+              .contains(query);
+        }).toList();
+    // Les BL du transitaire choisi passent en premier.
+    final id = _transitaire?.id;
+    if (id != null) {
+      rows.sort((a, b) {
+        final ma = a.dossier.transitaireAffecte?.id == id ? 0 : 1;
+        final mb = b.dossier.transitaireAffecte?.id == id ? 0 : 1;
+        return ma - mb;
+      });
+    }
+    return rows;
   }
 
   double get _total => _lines.fold(0, (s, l) => s + l.montant);
-  double get _truckTransport => _lines
-      .where(
-        (l) => _normalizePlate(l.plaque.text) == _normalizePlate(_currentPlate),
-      )
-      .fold(0, (s, l) => s + l.montantTransport);
-  double get _truckAdvance => _lines
-      .where(
-        (l) => _normalizePlate(l.plaque.text) == _normalizePlate(_currentPlate),
-      )
-      .fold(0, (s, l) => s + l.avanceCamion);
 
   static final _availableColumns = <ErpGridColumn<_AvailableContainer>>[
     ErpGridColumn(
@@ -1121,8 +1131,9 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
     ),
     ErpGridColumn(
       label: 'Numéro conteneur',
-      width: 160,
-      value: (a) => a.container.numero,
+      width: 170,
+      value: (a) =>
+          a.container.numero.isEmpty ? '(non saisi)' : a.container.numero,
     ),
     ErpGridColumn(label: 'Type', width: 110, value: (a) => a.container.type),
     ErpGridColumn(
@@ -1142,28 +1153,76 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
       width: 190,
       value: (a) => a.dossier.client.nom,
     ),
+    ErpGridColumn(
+      label: 'Transitaire du dossier',
+      width: 190,
+      value: (a) => a.dossier.transitaireAffecte?.entreprise ?? '',
+    ),
   ];
 
-  void _spreadToll() {
-    final total = _parseAmount(_globalToll.text) ?? 0;
-    if (_lines.isEmpty || _globalToll.text.trim().isEmpty) return;
-    final whole = total.round();
+  // Répartit un montant global à parts égales sur les conteneurs (le reste sur le dernier).
+  void _spread(
+    TextEditingController global,
+    TextEditingController Function(_TransitLineDraft) field,
+  ) {
+    if (_lines.isEmpty) return;
+    final whole = (_parseAmount(global.text) ?? 0).round();
     final share = whole ~/ _lines.length;
     for (final (i, line) in _lines.indexed) {
       final value = i == _lines.length - 1
           ? whole - share * (_lines.length - 1)
           : share;
-      line.toll.text = value == 0 ? '' : '$value';
+      field(line).text = value == 0 ? '' : '$value';
     }
   }
 
-  void _syncGlobalToll() {
+  void _spreadToll() => _spread(_globalToll, (l) => l.toll);
+
+  void _spreadAll() {
+    _spreadToll();
+    _spread(_truckTotal, (l) => l.transport);
+    _spread(_truckAdvance, (l) => l.advance);
+  }
+
+  // Le total en en-tête reflète la somme des lignes après une saisie ligne par ligne.
+  void _syncTotal(
+    TextEditingController global,
+    TextEditingController Function(_TransitLineDraft) field,
+  ) {
     final total = _lines.fold<double>(
       0,
-      (s, l) => s + (_parseAmount(l.toll.text) ?? 0),
+      (s, l) => s + (_parseAmount(field(l).text) ?? 0),
     );
-    _globalToll.text = total == 0 ? '' : total.toStringAsFixed(0);
+    global.text = total == 0 ? '' : total.toStringAsFixed(0);
   }
+
+  void _syncGlobalToll() => _syncTotal(_globalToll, (l) => l.toll);
+
+  void _syncTruckAmounts() {
+    _syncTotal(_truckTotal, (l) => l.transport);
+    _syncTotal(_truckAdvance, (l) => l.advance);
+  }
+
+  // Le camion saisi en en-tête s'applique à tous les conteneurs de la facture.
+  void _applyTruck() {
+    final plate = _currentPlate.toUpperCase();
+    final phone = _driverPhone.text.trim();
+    for (final line in _lines) {
+      line.transporteurId = _transporteur?.id ?? '';
+      line.plaque.text = plate;
+      line.telephone.text = phone;
+    }
+  }
+
+  List<(Prestataire, Vehicule)> get _trucks => [
+    for (final p in _transporteurs)
+      if (_transporteur == null || p.id == _transporteur!.id)
+        for (final v in p.vehicules) (p, v),
+    if (_transporteur != null)
+      for (final p in _transporteurs)
+        if (p.id != _transporteur!.id)
+          for (final v in p.vehicules) (p, v),
+  ];
 
   void _add(Iterable<_AvailableContainer> containers) {
     final phone = _driverPhone.text.trim();
@@ -1187,8 +1246,7 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
           ),
         );
       }
-      _selectedAvailable = null;
-      _spreadToll();
+      _spreadAll();
     });
   }
 
@@ -1289,7 +1347,36 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
   }
 
   Widget _buildHeaderFields() {
-    final vehicles = _transporteur?.vehicules ?? const <Vehicule>[];
+    final noTruckList =
+        _transporteur != null && _transporteur!.vehicules.isEmpty;
+    final trucks = _trucks;
+    final currentTruck = _vehicule == null
+        ? null
+        : trucks.where((t) => t.$2.id == _vehicule!.id).firstOrNull;
+    final plate = _currentPlate.isEmpty ? '' : ' ($_currentPlate)';
+    final shared = _lines.isEmpty
+        ? null
+        : 'Réparti sur ${_lines.length} conteneur(s)';
+    Widget amountField(
+      Key key,
+      TextEditingController controller,
+      String label,
+      IconData icon,
+      VoidCallback spread,
+    ) => SizedBox(
+      width: 220,
+      child: TextFormField(
+        key: key,
+        controller: controller,
+        textAlign: TextAlign.right,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: _inputDecoration(
+          label,
+          icon: icon,
+        ).copyWith(suffixText: 'F', helperText: shared),
+        onChanged: (_) => setState(spread),
+      ),
+    );
     return Wrap(
       spacing: 12,
       runSpacing: 12,
@@ -1312,24 +1399,28 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
         SizedBox(
           width: 250,
           child: SearchableDropdownFormField<Prestataire>(
-            key: const ValueKey('transitaire-invoice-carrier'),
+            // La clé suit le transporteur : choisir un camion met ce champ à jour.
+            key: ValueKey('transitaire-invoice-carrier-${_transporteur?.id}'),
             options: _transporteurs,
             value: _transporteur,
             label: 'Transporteur',
             emptyText: 'Ajoutez un transporteur dans Transport > Transporteurs',
             required: false,
             displayString: (p) => p.entreprise,
+            // Pendant la frappe la sélection est vidée : seul un choix dans la liste compte.
             onChanged: (p) => setState(() {
+              if (p == null || p.id == _transporteur?.id) return;
               _transporteur = p;
               _vehicule = null;
               _plateText.clear();
               _driverPhone.clear();
+              _applyTruck();
             }),
           ),
         ),
         SizedBox(
-          width: 210,
-          child: vehicles.isEmpty
+          width: 260,
+          child: noTruckList || trucks.isEmpty
               ? TextFormField(
                   key: const ValueKey('transitaire-invoice-plate-text'),
                   controller: _plateText,
@@ -1338,34 +1429,26 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
                     'Plaque véhicule',
                     icon: Icons.local_shipping_outlined,
                   ),
-                  onChanged: (_) => setState(() {}),
+                  onChanged: (_) => setState(_applyTruck),
                 )
-              : DropdownButtonFormField<Vehicule>(
-                  key: ValueKey(
-                    'transitaire-invoice-plate-${_transporteur?.id}',
-                  ),
-                  isExpanded: true,
-                  initialValue: _vehicule,
-                  decoration: _inputDecoration(
-                    'Plaque véhicule',
-                    icon: Icons.local_shipping_outlined,
-                  ),
-                  items: [
-                    for (final v in vehicles)
-                      DropdownMenuItem(
-                        value: v,
-                        child: Text(
-                          v.chauffeur.isEmpty
-                              ? v.plaque
-                              : '${v.plaque} • ${v.chauffeur}',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                  ],
-                  onChanged: (v) => setState(() {
-                    _vehicule = v;
-                    _plateText.text = v?.plaque ?? '';
-                    _driverPhone.text = v?.telephone ?? '';
+              : SearchableDropdownFormField<(Prestataire, Vehicule)>(
+                  key: ValueKey('transitaire-invoice-plate-${_vehicule?.id}'),
+                  options: trucks,
+                  value: currentTruck,
+                  label: 'Plaque véhicule',
+                  emptyText: 'Aucun camion enregistré',
+                  required: false,
+                  displayString: (t) => t.$2.chauffeur.isEmpty
+                      ? '${t.$2.plaque} • ${t.$1.entreprise}'
+                      : '${t.$2.plaque} • ${t.$2.chauffeur} • ${t.$1.entreprise}',
+                  // Le camion choisi remplit le transporteur et le téléphone du chauffeur.
+                  onChanged: (t) => setState(() {
+                    if (t == null || t.$2.id == _vehicule?.id) return;
+                    _transporteur = t.$1;
+                    _vehicule = t.$2;
+                    _plateText.text = t.$2.plaque;
+                    _driverPhone.text = t.$2.telephone;
+                    _applyTruck();
                   }),
                 ),
         ),
@@ -1379,6 +1462,7 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
               'Tél. chauffeur',
               icon: Icons.phone_rounded,
             ),
+            onChanged: (_) => setState(_applyTruck),
           ),
         ),
         SizedBox(
@@ -1412,35 +1496,26 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
             ),
           ),
         ),
-        _infoTile(
-          'Avance camion ${_currentPlate.isEmpty ? '' : '($_currentPlate)'}',
-          _amountText(_truckAdvance),
-          width: 190,
+        amountField(
+          const ValueKey('transitaire-invoice-truck-advance'),
+          _truckAdvance,
+          'Avance camion$plate',
+          Icons.payments_outlined,
+          () => _spread(_truckAdvance, (l) => l.advance),
         ),
-        _infoTile(
-          'Total transporteur ${_currentPlate.isEmpty ? '' : '($_currentPlate)'}',
-          _amountText(_truckTransport),
-          width: 200,
+        amountField(
+          const ValueKey('transitaire-invoice-truck-total'),
+          _truckTotal,
+          'Total transporteur$plate',
+          Icons.local_shipping_rounded,
+          () => _spread(_truckTotal, (l) => l.transport),
         ),
-        SizedBox(
-          width: 210,
-          child: TextFormField(
-            key: const ValueKey('transitaire-invoice-global-toll'),
-            controller: _globalToll,
-            textAlign: TextAlign.right,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration:
-                _inputDecoration(
-                  'Frais de péage global',
-                  icon: Icons.toll_rounded,
-                ).copyWith(
-                  suffixText: 'F',
-                  helperText: _lines.isEmpty
-                      ? null
-                      : 'Réparti sur ${_lines.length} conteneur(s)',
-                ),
-            onChanged: (_) => setState(_spreadToll),
-          ),
+        amountField(
+          const ValueKey('transitaire-invoice-global-toll'),
+          _globalToll,
+          'Frais de péage global',
+          Icons.toll_rounded,
+          _spreadToll,
         ),
       ],
     );
@@ -1471,32 +1546,19 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
               ),
             ),
           ),
-          FilledButton.icon(
-            key: const ValueKey('available-add'),
-            onPressed: _selectedAvailable == null
-                ? null
-                : () => _add([_selectedAvailable!]),
-            icon: const Icon(Icons.add_rounded),
-            label: const Text('Ajouter le conteneur'),
-          ),
           FilledButton.tonalIcon(
-            key: const ValueKey('available-add-bl'),
-            onPressed: _selectedAvailable == null
-                ? null
-                : () => _add(
-                    available.where(
-                      (a) =>
-                          a.dossier.id == _selectedAvailable!.dossier.id &&
-                          a.dossier.numBL == _selectedAvailable!.dossier.numBL,
-                    ),
-                  ),
+            key: const ValueKey('available-add-all'),
+            onPressed: available.isEmpty ? null : () => _add(available),
             icon: const Icon(Icons.playlist_add_rounded),
-            label: const Text('Ajouter tout le BL'),
+            label: Text(
+              _search.text.trim().isEmpty
+                  ? 'Tout ajouter'
+                  : 'Ajouter les ${available.length} résultat(s)',
+            ),
           ),
           Text(
-            _transporteur == null && _currentPlate.isEmpty
-                ? 'Astuce : choisissez le transporteur et la plaque en haut, ils seront repris par les conteneurs ajoutés.'
-                : 'Camion appliqué aux ajouts : ${_currentPlate.isEmpty ? '—' : _currentPlate}${_transporteur == null ? '' : ' (${_transporteur!.entreprise})'}',
+            'Cliquez sur une ligne pour l’ajouter au détail de la facture.'
+            '${_currentPlate.isEmpty ? '' : ' Camion : $_currentPlate${_transporteur == null ? '' : ' (${_transporteur!.entreprise})'}'}',
             style: const TextStyle(color: _gridMuted, fontSize: 12.5),
           ),
         ],
@@ -1508,13 +1570,12 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
           columns: _availableColumns,
           rows: available,
           rowId: (a) => a.cle,
-          selected: _selectedAvailable,
-          onSelect: (a) => setState(() => _selectedAvailable = a),
-          onOpen: (a) => _add([a]),
+          // Un clic ajoute directement le conteneur (ou le BL) à la facture.
+          onSelect: (a) => _add([a]),
           emptyIcon: Icons.inventory_2_outlined,
-          emptyText: _transitaire == null
-              ? 'Choisissez d’abord le transitaire.'
-              : 'Aucun conteneur à facturer pour ce transitaire.',
+          emptyText: _search.text.trim().isEmpty
+              ? 'Aucun BL à facturer : les conteneurs des dossiers ouverts sont déjà facturés.'
+              : 'Aucun BL ne correspond à la recherche.',
         ),
       ),
     ],
@@ -1526,6 +1587,7 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
       String? hint,
       bool amount = false,
       Key? key,
+      VoidCallback? sync,
     }) => TextFormField(
       key: key,
       controller: c,
@@ -1534,13 +1596,23 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
           ? const TextInputType.numberWithOptions(decimal: true)
           : null,
       decoration: _cellDecoration(hint: hint),
-      onChanged: (_) => setState(() {}),
+      onChanged: (_) => setState(sync ?? () {}),
     );
-    Widget fixed(String value) => Text(
+    Widget fixed(String value, {Key? key}) => Text(
       value,
+      key: key,
       overflow: TextOverflow.ellipsis,
       style: const TextStyle(color: _gridText),
     );
+    String truck(_TransitLineDraft line) {
+      final carrier = _transporteurs
+          .where((p) => p.id == line.transporteurId)
+          .firstOrNull
+          ?.entreprise;
+      final plate = line.plaque.text.trim();
+      return [?carrier, if (plate.isNotEmpty) plate].join(' • ');
+    }
+
     return SingleChildScrollView(
       child: _EditableTable(
         emptyText:
@@ -1551,8 +1623,7 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
           ('Date de départ', 130),
           ('Numéro conteneur', 150),
           ('Type', 100),
-          ('Transporteur', 200),
-          ('Véhicule', 190),
+          ('Transporteur / Véhicule', 230),
           ('Tél. chauffeur', 140),
           ('Frais de transit', 130),
           ('Surestaries / magasinage', 165),
@@ -1570,11 +1641,10 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
               fixed(line.bl),
               fixed(line.marchandise),
               cell(line.dateDepart, hint: 'jj/mm/aaaa'),
-              fixed(line.numeroConteneur),
+              fixed(line.numeroConteneur.isEmpty ? '—' : line.numeroConteneur),
               fixed(line.typeConteneur),
-              _carrierCell(i, line),
-              _vehicleCell(i, line),
-              cell(line.telephone),
+              fixed(truck(line), key: ValueKey('line-$i-truck')),
+              fixed(line.telephone.text),
               cell(
                 line.transit,
                 hint: '0',
@@ -1584,15 +1654,12 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
               cell(line.demurrage, hint: '0', amount: true),
               cell(line.volume, hint: '0', amount: true),
               cell(line.other, hint: '0', amount: true),
-              TextFormField(
+              cell(
+                line.toll,
+                hint: '0',
+                amount: true,
                 key: ValueKey('line-$i-toll'),
-                controller: line.toll,
-                textAlign: TextAlign.right,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: _cellDecoration(hint: '0'),
-                onChanged: (_) => setState(_syncGlobalToll),
+                sync: _syncGlobalToll,
               ),
               Text(
                 _amountText(line.montant),
@@ -1608,18 +1675,20 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
                 hint: '0',
                 amount: true,
                 key: ValueKey('line-$i-transport'),
+                sync: _syncTruckAmounts,
               ),
               cell(
                 line.advance,
                 hint: '0',
                 amount: true,
                 key: ValueKey('line-$i-advance'),
+                sync: _syncTruckAmounts,
               ),
               IconButton(
                 tooltip: 'Retirer de la facture',
                 onPressed: () => setState(() {
                   _lines.removeAt(i).dispose();
-                  _spreadToll();
+                  _spreadAll();
                 }),
                 icon: const Icon(
                   Icons.remove_circle_outline_rounded,
@@ -1629,67 +1698,6 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
             ],
         ],
       ),
-    );
-  }
-
-  Widget _carrierCell(int i, _TransitLineDraft line) {
-    final current = _transporteurs
-        .where((p) => p.id == line.transporteurId)
-        .firstOrNull;
-    return SearchableDropdownFormField<Prestataire>(
-      key: ValueKey('line-$i-carrier-${line.transporteurId}'),
-      options: _transporteurs,
-      value: current,
-      label: 'Transporteur',
-      emptyText: 'Aucun transporteur',
-      required: false,
-      displayString: (p) => p.entreprise,
-      // Pendant la frappe la sélection est vidée : seul un choix dans la liste compte.
-      onChanged: (p) => setState(() {
-        if (p == null || p.id == line.transporteurId) return;
-        line.transporteurId = p.id;
-        // Un autre transporteur : le camion et le chauffeur sont à choisir.
-        line.plaque.clear();
-        line.telephone.clear();
-      }),
-    );
-  }
-
-  Widget _vehicleCell(int i, _TransitLineDraft line) {
-    final vehicles =
-        _transporteurs
-            .where((p) => p.id == line.transporteurId)
-            .firstOrNull
-            ?.vehicules ??
-        const <Vehicule>[];
-    if (vehicles.isEmpty) {
-      return TextFormField(
-        key: ValueKey('line-$i-plate'),
-        controller: line.plaque,
-        textCapitalization: TextCapitalization.characters,
-        decoration: _cellDecoration(hint: 'Plaque'),
-        onChanged: (_) => setState(() {}),
-      );
-    }
-    final current = vehicles
-        .where(
-          (v) => _normalizePlate(v.plaque) == _normalizePlate(line.plaque.text),
-        )
-        .firstOrNull;
-    return SearchableDropdownFormField<Vehicule>(
-      key: ValueKey('line-$i-vehicle-${line.transporteurId}-${current?.id}'),
-      options: vehicles,
-      value: current,
-      label: 'Véhicule',
-      emptyText: 'Aucun camion',
-      required: false,
-      displayString: (v) => v.plaque,
-      onChanged: (v) => setState(() {
-        if (v == null) return;
-        line.plaque.text = v.plaque;
-        // Le téléphone du chauffeur suit le camion choisi.
-        line.telephone.text = v.telephone;
-      }),
     );
   }
 
