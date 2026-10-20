@@ -707,9 +707,48 @@ void main() {
       'bou',
       'BOUARE',
     );
+    // Nouveau camion créé depuis la facture : rattaché au transporteur DIVERS.
+    await tester.tap(
+      find.byKey(const ValueKey('transitaire-invoice-new-truck')),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('new-truck-plate')),
+      'aa 647 bz',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('new-truck-driver')),
+      'Mamadou',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('new-truck-phone')),
+      '+223 74 01 96 88',
+    );
+    await tester.tap(find.byKey(const ValueKey('new-truck-save')));
+    await tester.pumpAndSettle();
+    final divers = (erpBackend as MemoryErpBackend).prestataires.singleWhere(
+      (p) => p.entreprise == 'TRANSPORTEUR DIVERS',
+    );
+    expect(divers.type, 'Transporteur');
+    expect(divers.vehicules.single.plaque, 'AA 647 BZ');
+    expect(divers.vehicules.single.telephone, '+223 74 01 96 88');
+    expect(
+      tester
+          .widget<TextFormField>(
+            find.byKey(const ValueKey('transitaire-invoice-driver-phone')),
+          )
+          .controller!
+          .text,
+      '+223 74 01 96 88',
+    );
+    expect(
+      find.byKey(ValueKey('transitaire-invoice-carrier-${divers.id}')),
+      findsOneWidget,
+    );
+
     // La plaque saisie remplit le transporteur et le téléphone du chauffeur.
     await pick(
-      const ValueKey('transitaire-invoice-plate-null'),
+      ValueKey('transitaire-invoice-plate-${divers.vehicules.single.id}'),
       'ab 12',
       'AB 1234 MD • Moussa • SOSAF',
     );

@@ -1419,38 +1419,19 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
           ),
         ),
         SizedBox(
-          width: 260,
-          child: noTruckList || trucks.isEmpty
-              ? TextFormField(
-                  key: const ValueKey('transitaire-invoice-plate-text'),
-                  controller: _plateText,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: _inputDecoration(
-                    'Plaque véhicule',
-                    icon: Icons.local_shipping_outlined,
-                  ),
-                  onChanged: (_) => setState(_applyTruck),
-                )
-              : SearchableDropdownFormField<(Prestataire, Vehicule)>(
-                  key: ValueKey('transitaire-invoice-plate-${_vehicule?.id}'),
-                  options: trucks,
-                  value: currentTruck,
-                  label: 'Plaque véhicule',
-                  emptyText: 'Aucun camion enregistré',
-                  required: false,
-                  displayString: (t) => t.$2.chauffeur.isEmpty
-                      ? '${t.$2.plaque} • ${t.$1.entreprise}'
-                      : '${t.$2.plaque} • ${t.$2.chauffeur} • ${t.$1.entreprise}',
-                  // Le camion choisi remplit le transporteur et le téléphone du chauffeur.
-                  onChanged: (t) => setState(() {
-                    if (t == null || t.$2.id == _vehicule?.id) return;
-                    _transporteur = t.$1;
-                    _vehicule = t.$2;
-                    _plateText.text = t.$2.plaque;
-                    _driverPhone.text = t.$2.telephone;
-                    _applyTruck();
-                  }),
-                ),
+          width: 312,
+          child: Row(
+            children: [
+              Expanded(child: _plateField(noTruckList, trucks, currentTruck)),
+              const SizedBox(width: 6),
+              IconButton.filledTonal(
+                key: const ValueKey('transitaire-invoice-new-truck'),
+                tooltip: 'Nouveau camion',
+                onPressed: _createTruck,
+                icon: const Icon(Icons.add_rounded),
+              ),
+            ],
+          ),
         ),
         SizedBox(
           width: 190,
@@ -1520,6 +1501,115 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
       ],
     );
   }
+
+  // Transporteur « DIVERS » qui reçoit les camions saisis sans transporteur connu.
+  Prestataire? get _diversCarrier => _transporteurs
+      .where((p) => p.entreprise.toUpperCase().contains('DIVERS'))
+      .firstOrNull;
+
+  // Nouveau camion saisi depuis la facture : rattaché au transporteur choisi
+  // ou au transporteur DIVERS (créé au besoin avec le compte fournisseur général).
+  Future<void> _createTruck() async {
+    final draft = await showDialog<_NewTruck>(
+      context: context,
+      builder: (_) => _NewTruckDialog(
+        transporteurs: _transporteurs,
+        initialCarrier: _transporteur ?? _diversCarrier,
+        plate: _vehicule == null ? _plateText.text : '',
+        existingPlates: {
+          for (final p in _transporteurs)
+            for (final v in p.vehicules) _normalizePlate(v.plaque),
+        },
+      ),
+    );
+    if (draft == null || !mounted) return;
+    var carrier = draft.carrier;
+    final created = carrier == null;
+    carrier ??= Prestataire(
+      id: newLocalId('prest'),
+      entreprise: 'TRANSPORTEUR DIVERS',
+      type: 'Transporteur',
+      pays: 'Mali',
+      villePort: '',
+      contact: '',
+      telephone: '',
+      email: '',
+      services: 'Camions divers',
+      compteComptable:
+          _accountsForTiers(
+            _planAccounts,
+            nature: 'Fournisseur',
+            classPrefix: '40',
+          ).firstOrNull?.code ??
+          '',
+    );
+    final vehicle = Vehicule(
+      id: newLocalId('veh'),
+      plaque: draft.plaque,
+      chauffeur: draft.chauffeur,
+      telephone: draft.telephone,
+    );
+    final previous = carrier.vehicules;
+    carrier.vehicules = [...previous, vehicle];
+    final target = carrier;
+    if (!await _persist(context, () => erpBackend.savePrestataire(target))) {
+      target.vehicules = previous;
+      return;
+    }
+    if (created) {
+      widget.prestataires.add(target);
+      _linkTiersAccount(
+        _planAccounts,
+        tiersId: target.id,
+        previousCode: null,
+        newCode: target.compteComptable,
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _transporteur = target;
+      _vehicule = vehicle;
+      _plateText.text = vehicle.plaque;
+      _driverPhone.text = vehicle.telephone;
+      _applyTruck();
+    });
+  }
+
+  Widget _plateField(
+    bool noTruckList,
+    List<(Prestataire, Vehicule)> trucks,
+    (Prestataire, Vehicule)? currentTruck,
+  ) => noTruckList || trucks.isEmpty
+      ? TextFormField(
+          key: const ValueKey('transitaire-invoice-plate-text'),
+          controller: _plateText,
+          textCapitalization: TextCapitalization.characters,
+          decoration: _inputDecoration(
+            'Plaque véhicule',
+            icon: Icons.local_shipping_outlined,
+          ),
+          onChanged: (_) => setState(_applyTruck),
+        )
+      : SearchableDropdownFormField<(Prestataire, Vehicule)>(
+          key: ValueKey('transitaire-invoice-plate-${_vehicule?.id}'),
+          options: trucks,
+          value: currentTruck,
+          label: 'Plaque véhicule',
+          emptyText: 'Aucun camion enregistré',
+          required: false,
+          displayString: (t) => t.$2.chauffeur.isEmpty
+              ? '${t.$2.plaque} • ${t.$1.entreprise}'
+              : '${t.$2.plaque} • ${t.$2.chauffeur} • ${t.$1.entreprise}',
+          // Le camion choisi remplit le transporteur et le téléphone du chauffeur.
+          onChanged: (t) => setState(() {
+            if (t == null || t.$2.id == _vehicule?.id) return;
+            _transporteur = t.$1;
+            _vehicule = t.$2;
+            _plateText.text = t.$2.plaque;
+            _driverPhone.text = t.$2.telephone;
+            _applyTruck();
+          }),
+        );
 
   Widget _buildAvailableTab(List<_AvailableContainer> available) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1768,6 +1858,144 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
     }
     Navigator.pop(context, facture);
   }
+}
+
+class _NewTruck {
+  final Prestataire? carrier;
+  final String plaque;
+  final String chauffeur;
+  final String telephone;
+
+  const _NewTruck(this.carrier, this.plaque, this.chauffeur, this.telephone);
+}
+
+// Saisie rapide d'un camion : plaque, chauffeur, téléphone et transporteur.
+class _NewTruckDialog extends StatefulWidget {
+  final List<Prestataire> transporteurs;
+  final Prestataire? initialCarrier;
+  final String plate;
+  final Set<String> existingPlates;
+
+  const _NewTruckDialog({
+    required this.transporteurs,
+    required this.initialCarrier,
+    required this.plate,
+    required this.existingPlates,
+  });
+
+  @override
+  State<_NewTruckDialog> createState() => _NewTruckDialogState();
+}
+
+class _NewTruckDialogState extends State<_NewTruckDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final _plate = TextEditingController(text: widget.plate.toUpperCase());
+  final _driver = TextEditingController();
+  final _phone = TextEditingController();
+  late Prestataire? _carrier = widget.initialCarrier;
+
+  @override
+  void dispose() {
+    _plate.dispose();
+    _driver.dispose();
+    _phone.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Nouveau camion'),
+    content: SizedBox(
+      width: 380,
+      child: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              key: const ValueKey('new-truck-plate'),
+              controller: _plate,
+              autofocus: true,
+              textCapitalization: TextCapitalization.characters,
+              decoration: _inputDecoration(
+                'Numéro du véhicule (plaque) *',
+                icon: Icons.local_shipping_outlined,
+              ),
+              validator: (value) {
+                final plate = _normalizePlate(value ?? '');
+                if (plate.isEmpty) return 'Champ obligatoire';
+                if (widget.existingPlates.contains(plate)) {
+                  return 'Ce camion existe déjà : choisissez-le dans la liste';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              key: const ValueKey('new-truck-driver'),
+              controller: _driver,
+              textCapitalization: TextCapitalization.words,
+              decoration: _inputDecoration(
+                'Nom du chauffeur',
+                icon: Icons.person_outline_rounded,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              key: const ValueKey('new-truck-phone'),
+              controller: _phone,
+              keyboardType: TextInputType.phone,
+              decoration: _inputDecoration(
+                'Numéro du chauffeur',
+                icon: Icons.phone_rounded,
+              ),
+            ),
+            const SizedBox(height: 12),
+            SearchableDropdownFormField<Prestataire>(
+              key: const ValueKey('new-truck-carrier'),
+              options: widget.transporteurs,
+              value: _carrier,
+              label: 'Transporteur',
+              emptyText: 'TRANSPORTEUR DIVERS',
+              required: false,
+              displayString: (p) => p.entreprise,
+              onChanged: (p) => setState(() => _carrier = p),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _carrier == null
+                  ? 'Sans transporteur choisi, le camion est rattaché à « TRANSPORTEUR DIVERS », créé automatiquement.'
+                  : 'Le camion est ajouté à la fiche de ${_carrier!.entreprise}.',
+              style: const TextStyle(color: _gridMuted, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Annuler'),
+      ),
+      FilledButton.icon(
+        key: const ValueKey('new-truck-save'),
+        onPressed: () {
+          if (!_formKey.currentState!.validate()) return;
+          Navigator.pop(
+            context,
+            _NewTruck(
+              _carrier,
+              _plate.text.trim().toUpperCase(),
+              _driver.text.trim(),
+              _phone.text.trim(),
+            ),
+          );
+        },
+        icon: const Icon(Icons.check_rounded),
+        label: const Text('Créer le camion'),
+      ),
+    ],
+  );
 }
 
 Future<void> _printFactureTransitaire(
