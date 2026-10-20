@@ -3,18 +3,20 @@ part of '../main.dart';
 // --- VOYAGES : camions partis, construits depuis les factures transitaire ---
 
 class _VoyageContainer {
+  final TransitDossier? dossier;
   final String bl;
   final String numero;
   final String marchandise;
 
-  const _VoyageContainer(this.bl, this.numero, this.marchandise);
+  const _VoyageContainer(this.dossier, this.bl, this.numero, this.marchandise);
 }
 
-// Un voyage : un camion parti à une date avec jusqu'à trois conteneurs d'un dossier.
+// Un voyage : un camion parti à une date avec jusqu'à trois conteneurs,
+// qui peuvent venir de dossiers différents (BL 1, BL 2, BL 3 sur la même ligne).
 class _VoyageRow {
   final String id;
   int numero = 0;
-  final TransitDossier? dossier;
+  final List<TransitDossier> dossiers;
   final String transitaire;
   final String dateDepart;
   final String transporteur;
@@ -28,7 +30,7 @@ class _VoyageRow {
 
   _VoyageRow({
     required this.id,
-    required this.dossier,
+    required this.dossiers,
     required this.transitaire,
     required this.dateDepart,
     required this.transporteur,
@@ -43,9 +45,19 @@ class _VoyageRow {
 
   DateTime? get date => _parseFrDate(dateDepart);
 
+  TransitDossier? get dossier => dossiers.firstOrNull;
+
+  String get numerosDossier => dossiers.map((d) => d.numDossier).join(', ');
+
+  String get clients => dossiers.map((d) => d.client.nom).toSet().join(', ');
+
   _VoyageContainer? conteneur(int index) =>
       index < conteneurs.length ? conteneurs[index] : null;
 }
+
+// Valeurs distinctes non vides, dans l'ordre d'apparition.
+String _joinDistinct(Iterable<String> values) =>
+    values.where((v) => v.trim().isNotEmpty).toSet().join(', ');
 
 List<_VoyageRow> _buildVoyages({
   required List<TransitDossier> dossiers,
@@ -60,49 +72,58 @@ List<_VoyageRow> _buildVoyages({
     for (final p in prestataires)
       for (final v in p.vehicules) _normalizePlate(v.plaque): (p, v),
   };
-  final rows = <_VoyageRow>[];
+  // Un camion, une date de départ : un voyage, toutes factures confondues.
+  final groups =
+      <String, List<(FactureTransitaire, FactureTransitaireLigne)>>{};
   for (final f in factures) {
-    final groups = <String, List<FactureTransitaireLigne>>{};
     for (final l in f.lignes) {
       if (l.plaque.trim().isEmpty && l.transporteurId.isEmpty) continue;
-      groups
-          .putIfAbsent(
-            '${l.dossierId}|${_normalizePlate(l.plaque)}|${l.dateDepart}',
-            () => [],
-          )
-          .add(l);
+      final truckKey = l.plaque.trim().isEmpty
+          ? 'transporteur:${l.transporteurId}'
+          : _normalizePlate(l.plaque);
+      groups.putIfAbsent('$truckKey|${l.dateDepart}', () => []).add((f, l));
     }
-    for (final entry in groups.entries) {
-      final lines = entry.value;
-      final first = lines.first;
-      final truck = trucks[_normalizePlate(first.plaque)];
-      final carrier =
-          partnerById[first.transporteurId]?.entreprise ??
-          truck?.$1.entreprise ??
-          '';
-      final dossier = dossierById[first.dossierId];
-      // Un camion porte au plus trois conteneurs : au-delà, un nouveau voyage.
-      for (var start = 0; start < lines.length; start += 3) {
-        final chunk = lines.skip(start).take(3).toList();
-        rows.add(
-          _VoyageRow(
-            id: '${f.id}|${entry.key}|$start',
-            dossier: dossier,
-            transitaire: partnerById[f.transitaireId]?.entreprise ?? '',
-            dateDepart: first.dateDepart,
-            transporteur: carrier,
-            plaque: first.plaque,
-            chauffeur: truck?.$2.chauffeur ?? '',
-            telephone: first.telephoneChauffeur,
-            conteneurs: [
-              for (final l in chunk)
-                _VoyageContainer(l.bl, l.numeroConteneur, l.marchandise),
-            ],
-            description: dossier?.description ?? '',
-            origine: f.reference,
+  }
+  final rows = <_VoyageRow>[];
+  for (final entry in groups.entries) {
+    final lines = entry.value;
+    final first = lines.first.$2;
+    final truck = trucks[_normalizePlate(first.plaque)];
+    final carrier =
+        partnerById[first.transporteurId]?.entreprise ??
+        truck?.$1.entreprise ??
+        '';
+    // Un camion porte au plus trois conteneurs : au-delà, un nouveau voyage.
+    for (var start = 0; start < lines.length; start += 3) {
+      final chunk = lines.skip(start).take(3).toList();
+      final chunkDossiers = <TransitDossier>[
+        ...{for (final (_, l) in chunk) ?dossierById[l.dossierId]},
+      ];
+      rows.add(
+        _VoyageRow(
+          id: '${entry.key}|$start',
+          dossiers: chunkDossiers,
+          transitaire: _joinDistinct(
+            chunk.map((e) => partnerById[e.$1.transitaireId]?.entreprise ?? ''),
           ),
-        );
-      }
+          dateDepart: first.dateDepart,
+          transporteur: carrier,
+          plaque: first.plaque,
+          chauffeur: truck?.$2.chauffeur ?? '',
+          telephone: first.telephoneChauffeur,
+          conteneurs: [
+            for (final (_, l) in chunk)
+              _VoyageContainer(
+                dossierById[l.dossierId],
+                l.bl,
+                l.numeroConteneur,
+                l.marchandise,
+              ),
+          ],
+          description: _joinDistinct(chunkDossiers.map((d) => d.description)),
+          origine: _joinDistinct(chunk.map((e) => e.$1.reference)),
+        ),
+      );
     }
   }
   // Voyages saisis à la main depuis cet écran.
@@ -112,7 +133,7 @@ List<_VoyageRow> _buildVoyages({
     rows.add(
       _VoyageRow(
         id: 'saisie|${v.id}',
-        dossier: dossier,
+        dossiers: [?dossier],
         transitaire: dossier?.transitaireAffecte?.entreprise ?? '',
         dateDepart: v.depart,
         transporteur: truck?.$1.entreprise ?? '',
@@ -135,7 +156,7 @@ List<_VoyageRow> _buildVoyages({
   rows.sort((a, b) {
     final byDate = (a.date ?? DateTime(0)).compareTo(b.date ?? DateTime(0));
     if (byDate != 0) return byDate;
-    return (a.dossier?.numDossier ?? '').compareTo(b.dossier?.numDossier ?? '');
+    return a.numerosDossier.compareTo(b.numerosDossier);
   });
   for (final (i, row) in rows.indexed) {
     row.numero = i + 1;
@@ -190,9 +211,15 @@ class _VoyagesPageState extends State<VoyagesPage> {
       if (!_inPeriod(date, _from, _to)) return false;
       if (_treeYear != null && date?.year != _treeYear) return false;
       if (_treeMonth != null && date?.month != _treeMonth) return false;
-      if (_client != null && v.dossier?.client.id != _client!.id) return false;
-      if (_dossier != null && v.dossier?.id != _dossier!.id) return false;
-      if (_transitaire != null && v.transitaire != _transitaire!.entreprise) {
+      if (_client != null &&
+          !v.dossiers.any((d) => d.client.id == _client!.id)) {
+        return false;
+      }
+      if (_dossier != null && !v.dossiers.any((d) => d.id == _dossier!.id)) {
+        return false;
+      }
+      if (_transitaire != null &&
+          !v.transitaire.split(', ').contains(_transitaire!.entreprise)) {
         return false;
       }
       if (_transporteur != null &&
@@ -228,13 +255,9 @@ class _VoyagesPageState extends State<VoyagesPage> {
     ErpGridColumn(
       label: 'Numéro Dossier',
       width: 190,
-      value: (v) => v.dossier?.numDossier ?? '',
+      value: (v) => v.numerosDossier,
     ),
-    ErpGridColumn(
-      label: 'Client',
-      width: 180,
-      value: (v) => v.dossier?.client.nom ?? '',
-    ),
+    ErpGridColumn(label: 'Client', width: 180, value: (v) => v.clients),
     ErpGridColumn(
       label: 'Transitaire',
       width: 170,
@@ -386,7 +409,7 @@ class _VoyagesPageState extends State<VoyagesPage> {
                   Text(
                     selected == null
                         ? 'Camions partis par dossier, mois par mois.'
-                        : 'Voyage n° ${selected.numero} • ${selected.plaque} • ${selected.dossier?.numDossier ?? ''}',
+                        : 'Voyage n° ${selected.numero} • ${selected.plaque} • ${selected.numerosDossier}',
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: _gridMuted, fontSize: 12.5),
                   ),

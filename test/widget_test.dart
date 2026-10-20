@@ -866,34 +866,42 @@ void main() {
       findsNWidgets(3),
     );
 
-    // Les camions de la facture deviennent des voyages : un par dossier.
+    // Même camion, même date : un seul voyage, les BL des deux dossiers se suivent.
     await tester.ensureVisible(find.byTooltip('Transport'));
     await tester.tap(find.byTooltip('Transport'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Voyages').last);
     await tester.pumpAndSettle();
-    expect(find.text('Nbre de voyages : 2'), findsOneWidget);
+    expect(find.text('Nbre de voyages : 1'), findsOneWidget);
     final voyages = find.byKey(const ValueKey('voyages-grid'));
     Finder inVoyages(Finder f) => find.descendant(of: voyages, matching: f);
-    expect(inVoyages(find.text('BF 5295 MD')), findsNWidgets(2));
-    expect(inVoyages(find.text('MSKU0000002')), findsOneWidget);
-    expect(inVoyages(find.text('Issa')), findsNWidgets(2));
-    // Filtre de colonne : on ne garde que le dossier STT-d2.
-    await tester.tap(find.byKey(const ValueKey('grid-filter-1')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('(Tout sélectionner)'));
-    await tester.pumpAndSettle();
-    await tester.tap(
-      find.descendant(
-        of: find.byType(AlertDialog),
-        matching: find.text('STT-d2'),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('grid-filter-apply')));
-    await tester.pumpAndSettle();
+    expect(inVoyages(find.text('BF 5295 MD')), findsOneWidget);
+    expect(inVoyages(find.text('STT-d1, STT-d2')), findsOneWidget);
+    expect(inVoyages(find.text('BL-1')), findsNWidgets(2));
+    expect(inVoyages(find.text('BL-2')), findsOneWidget);
     expect(inVoyages(find.text('TCLU0000003')), findsOneWidget);
-    expect(inVoyages(find.text('MSKU0000002')), findsNothing);
+    expect(inVoyages(find.text('Issa')), findsOneWidget);
+    // Filtre de colonne : tout décocher masque le voyage, tout recocher le réaffiche.
+    Future<void> toggleDossierFilter() async {
+      await tester.tap(find.byKey(const ValueKey('grid-filter-1')));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('STT-d1, STT-d2'),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('(Tout sélectionner)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('grid-filter-apply')));
+      await tester.pumpAndSettle();
+    }
+
+    await toggleDossierFilter();
+    expect(inVoyages(find.text('TCLU0000003')), findsNothing);
+    await toggleDossierFilter();
+    expect(inVoyages(find.text('TCLU0000003')), findsOneWidget);
     await tester.ensureVisible(find.byTooltip('Prestation'));
     await tester.tap(find.byTooltip('Prestation'));
     await tester.pumpAndSettle();
