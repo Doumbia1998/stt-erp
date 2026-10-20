@@ -422,17 +422,31 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Voyages').last);
     await tester.pumpAndSettle();
+    expect(find.text('Nbre de voyages : 0'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('add-voyage')));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextFormField).at(0), 'AB 1234 MD');
-    await tester.enterText(find.byType(TextFormField).at(1), 'Chauffeur Test');
-    await tester.enterText(find.byType(TextFormField).at(2), 'Dakar');
-    await tester.enterText(find.byType(TextFormField).at(3), 'Bamako');
-    await tester.enterText(find.byType(TextFormField).at(4), '12/10/2026');
-    await tester.enterText(find.byType(TextFormField).at(5), '15/10/2026');
+    Finder voyageField(int i) => find
+        .descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byType(TextFormField),
+        )
+        .at(i);
+    await tester.enterText(voyageField(0), 'AB 1234 MD');
+    await tester.enterText(voyageField(1), 'Chauffeur Test');
+    await tester.enterText(voyageField(2), 'Dakar');
+    await tester.enterText(voyageField(3), 'Bamako');
+    await tester.enterText(voyageField(4), '12/10/2026');
+    await tester.enterText(voyageField(5), '15/10/2026');
     await tester.tap(find.text('Enregistrer'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('AB 1234 MD'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('voyages-grid')),
+        matching: find.text('AB 1234 MD'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Nbre de voyages : 1'), findsOneWidget);
   });
 
   testWidgets('Mobile uses module drawer and can create a provider', (
@@ -812,6 +826,40 @@ void main() {
       find.descendant(of: lines, matching: find.text('STL')),
       findsNWidgets(3),
     );
+
+    // Les camions de la facture deviennent des voyages : un par dossier.
+    await tester.ensureVisible(find.byTooltip('Transport'));
+    await tester.tap(find.byTooltip('Transport'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Voyages').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Nbre de voyages : 2'), findsOneWidget);
+    final voyages = find.byKey(const ValueKey('voyages-grid'));
+    Finder inVoyages(Finder f) => find.descendant(of: voyages, matching: f);
+    expect(inVoyages(find.text('BF 5295 MD')), findsNWidgets(2));
+    expect(inVoyages(find.text('MSKU0000002')), findsOneWidget);
+    expect(inVoyages(find.text('Issa')), findsNWidgets(2));
+    // Filtre de colonne : on ne garde que le dossier STT-d2.
+    await tester.tap(find.byKey(const ValueKey('grid-filter-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('(Tout sélectionner)'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text('STT-d2'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('grid-filter-apply')));
+    await tester.pumpAndSettle();
+    expect(inVoyages(find.text('TCLU0000003')), findsOneWidget);
+    expect(inVoyages(find.text('MSKU0000002')), findsNothing);
+    await tester.ensureVisible(find.byTooltip('Prestation'));
+    await tester.tap(find.byTooltip('Prestation'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Facture Transitaire').last);
+    await tester.pumpAndSettle();
 
     await tester.ensureVisible(find.byKey(const ValueKey('payment-new')));
     await tester.pumpAndSettle();

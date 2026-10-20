@@ -51,6 +51,8 @@ class ErpGrid<T> extends StatefulWidget {
   final IconData emptyIcon;
   final String Function(T row) rowId;
   final double rowHeight;
+  // Ajoute à chaque colonne une liste déroulante de filtre (valeurs à cocher).
+  final bool filterable;
 
   const ErpGrid({
     super.key,
@@ -63,6 +65,7 @@ class ErpGrid<T> extends StatefulWidget {
     this.emptyText = 'Aucune donnée à afficher',
     this.emptyIcon = Icons.inbox_outlined,
     this.rowHeight = 42,
+    this.filterable = false,
   });
 
   @override
@@ -74,6 +77,8 @@ class _ErpGridState<T> extends State<ErpGrid<T>> {
   final _vertical = ScrollController();
   int? _sortColumn;
   bool _ascending = true;
+  // Valeurs retenues par colonne filtrée.
+  final Map<int, Set<String>> _filters = {};
 
   static const _headerHeight = 48.0;
   static const _scrollbarThickness = 12.0;
@@ -85,17 +90,51 @@ class _ErpGridState<T> extends State<ErpGrid<T>> {
     super.dispose();
   }
 
+  List<T> get _filteredRows {
+    if (_filters.isEmpty) return widget.rows;
+    return widget.rows
+        .where(
+          (row) => _filters.entries.every(
+            (f) => f.value.contains(widget.columns[f.key].value(row)),
+          ),
+        )
+        .toList();
+  }
+
   List<T> get _sortedRows {
     final index = _sortColumn;
-    if (index == null) return widget.rows;
+    final filtered = _filteredRows;
+    if (index == null) return filtered;
     final column = widget.columns[index];
     final key = column.sortValue ?? (T row) => column.value(row).toLowerCase();
-    final rows = [...widget.rows]
+    final rows = [...filtered]
       ..sort((a, b) {
         final result = key(a).compareTo(key(b));
         return _ascending ? result : -result;
       });
     return rows;
+  }
+
+  Future<void> _openFilter(int index) async {
+    final column = widget.columns[index];
+    final values = widget.rows.map(column.value).toSet().toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final result = await showDialog<Set<String>>(
+      context: context,
+      builder: (_) => _ColumnFilterDialog(
+        label: column.label,
+        values: values,
+        selected: _filters[index] ?? values.toSet(),
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      if (result.length >= values.length) {
+        _filters.remove(index);
+      } else {
+        _filters[index] = result;
+      }
+    });
   }
 
   void _sortBy(int index) => setState(() {
@@ -260,6 +299,27 @@ class _ErpGridState<T> extends State<ErpGrid<T>> {
                       size: 14,
                       color: Colors.white,
                     ),
+                  if (widget.filterable)
+                    InkWell(
+                      key: ValueKey('grid-filter-$index'),
+                      borderRadius: BorderRadius.circular(6),
+                      onTap: () => _openFilter(index),
+                      child: Tooltip(
+                        message: 'Filtrer la colonne',
+                        child: Padding(
+                          padding: const EdgeInsets.all(3),
+                          child: Icon(
+                            _filters.containsKey(index)
+                                ? Icons.filter_alt_rounded
+                                : Icons.filter_alt_outlined,
+                            size: 16,
+                            color: _filters.containsKey(index)
+                                ? const Color(0xFFFDE68A)
+                                : Colors.white70,
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -393,6 +453,113 @@ class _ErpGridState<T> extends State<ErpGrid<T>> {
       ],
     ),
   );
+}
+
+// Liste de filtre d'une colonne : recherche et valeurs à cocher.
+class _ColumnFilterDialog extends StatefulWidget {
+  final String label;
+  final List<String> values;
+  final Set<String> selected;
+
+  const _ColumnFilterDialog({
+    required this.label,
+    required this.values,
+    required this.selected,
+  });
+
+  @override
+  State<_ColumnFilterDialog> createState() => _ColumnFilterDialogState();
+}
+
+class _ColumnFilterDialogState extends State<_ColumnFilterDialog> {
+  late final Set<String> _checked = {...widget.selected};
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final query = _query.trim().toLowerCase();
+    final visible = widget.values
+        .where((v) => query.isEmpty || v.toLowerCase().contains(query))
+        .toList();
+    final allVisible = visible.every(_checked.contains);
+    return AlertDialog(
+      title: Text('Filtrer : ${widget.label}'),
+      content: SizedBox(
+        width: 340,
+        height: 400,
+        child: Column(
+          children: [
+            TextField(
+              key: const ValueKey('grid-filter-search'),
+              autofocus: true,
+              onChanged: (v) => setState(() => _query = v),
+              decoration: InputDecoration(
+                hintText: 'Rechercher…',
+                isDense: true,
+                prefixIcon: const Icon(Icons.search_rounded),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+            CheckboxListTile(
+              dense: true,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: allVisible,
+              title: const Text(
+                '(Tout sélectionner)',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              onChanged: (v) => setState(() {
+                if (v ?? false) {
+                  _checked.addAll(visible);
+                } else {
+                  _checked.removeAll(visible);
+                }
+              }),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: ListView(
+                children: [
+                  for (final v in visible)
+                    CheckboxListTile(
+                      dense: true,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      value: _checked.contains(v),
+                      title: Text(v.isEmpty ? '(Vide)' : v),
+                      onChanged: (c) => setState(
+                        () =>
+                            (c ?? false) ? _checked.add(v) : _checked.remove(v),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, widget.values.toSet()),
+          child: const Text('Effacer le filtre'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Annuler'),
+        ),
+        FilledButton(
+          key: const ValueKey('grid-filter-apply'),
+          // Après une recherche, seules les valeurs trouvées et cochées sont gardées.
+          onPressed: () => Navigator.pop(
+            context,
+            query.isEmpty ? _checked : _checked.intersection(visible.toSet()),
+          ),
+          child: const Text('OK'),
+        ),
+      ],
+    );
+  }
 }
 
 // Pastille de statut colorée utilisée dans les grilles.

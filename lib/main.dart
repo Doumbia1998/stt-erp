@@ -27,6 +27,7 @@ part 'pages/facture_transitaire_page.dart';
 part 'pages/facture_transporteur_page.dart';
 part 'pages/frais_caisse_pages.dart';
 part 'pages/transporteurs_page.dart';
+part 'pages/voyages_page.dart';
 part 'widgets/erp_documents.dart';
 part 'widgets/erp_grid.dart';
 part 'widgets/tiers_accounts.dart';
@@ -873,7 +874,13 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           comptes: _planAccounts,
         );
       case 'Voyages':
-        return VoyagesPage(dossiers: _dossiers, voyages: _voyages);
+        return VoyagesPage(
+          dossiers: _dossiers,
+          voyages: _voyages,
+          clients: _clients,
+          prestataires: _prestataires,
+          factures: _facturesTransitaire,
+        );
       case 'Gestion utilisateur':
         return UserManagementPage(
           users: _erpUsers,
@@ -2279,120 +2286,6 @@ class _SettlementEntryPageState extends State<SettlementEntryPage> {
       ),
     );
     await Printing.layoutPdf(onLayout: (_) async => pdf.save());
-  }
-}
-
-class VoyagesPage extends StatefulWidget {
-  final List<TransitDossier> dossiers;
-  final List<Voyage> voyages;
-
-  const VoyagesPage({super.key, required this.dossiers, required this.voyages});
-
-  @override
-  State<VoyagesPage> createState() => _VoyagesPageState();
-}
-
-class _VoyagesPageState extends State<VoyagesPage> {
-  String _query = '';
-
-  @override
-  Widget build(BuildContext context) {
-    final voyages = widget.voyages.where((voyage) {
-      final dossier = widget.dossiers.firstWhere(
-        (entry) => entry.id == voyage.dossierId,
-      );
-      return '${dossier.numDossier} ${voyage.plaque} ${voyage.chauffeur} ${voyage.origine} ${voyage.destination} ${voyage.statut}'
-          .toLowerCase()
-          .contains(_query.toLowerCase());
-    }).toList();
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FD),
-      appBar: AppBar(
-        title: const Text('Voyages'),
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF1A237E),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(72),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: TextField(
-              onChanged: (value) => setState(() => _query = value),
-              decoration: const InputDecoration(
-                hintText: 'Rechercher un voyage, dossier ou véhicule…',
-                prefixIcon: Icon(Icons.search),
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ),
-        ),
-      ),
-      body: voyages.isEmpty
-          ? const Center(child: Text('Aucun voyage enregistré.'))
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: voyages.length,
-              itemBuilder: (context, index) {
-                final voyage = voyages[index];
-                final dossier = widget.dossiers.firstWhere(
-                  (entry) => entry.id == voyage.dossierId,
-                );
-                return Card(
-                  child: ListTile(
-                    leading: const CircleAvatar(
-                      child: Icon(Icons.local_shipping_rounded),
-                    ),
-                    title: Text(
-                      '${dossier.numDossier} • ${voyage.plaque}',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    subtitle: Text(
-                      '${voyage.origine} → ${voyage.destination}\n${voyage.chauffeur} • Départ ${voyage.depart} • Arrivée prévue ${voyage.arriveePrevue} • ${voyage.statut}',
-                    ),
-                    isThreeLine: true,
-                    trailing: IconButton(
-                      tooltip: 'Modifier le voyage',
-                      onPressed: () => _editVoyage(voyage),
-                      icon: const Icon(Icons.edit_outlined),
-                    ),
-                  ),
-                );
-              },
-            ),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const ValueKey('add-voyage'),
-        heroTag: 'voyage-add',
-        onPressed: () => _editVoyage(),
-        icon: const Icon(Icons.add_road_rounded),
-        label: const Text('NOUVEAU VOYAGE'),
-      ),
-    );
-  }
-
-  Future<void> _editVoyage([Voyage? initial]) async {
-    if (widget.dossiers.isEmpty) {
-      await _showInfoAlert(
-        context,
-        title: 'Dossier requis',
-        message: 'Créez d’abord un dossier avant d’enregistrer un voyage.',
-      );
-      return;
-    }
-    final voyage = await showDialog<Voyage>(
-      context: context,
-      builder: (context) =>
-          _VoyageFormDialog(dossiers: widget.dossiers, initial: initial),
-    );
-    if (voyage == null || !mounted) return;
-    if (!await _persist(context, () => erpBackend.saveVoyage(voyage))) return;
-    if (!mounted) return;
-    setState(() {
-      final index = widget.voyages.indexWhere((entry) => entry.id == voyage.id);
-      if (index < 0) {
-        widget.voyages.add(voyage);
-      } else {
-        widget.voyages[index] = voyage;
-      }
-    });
   }
 }
 
