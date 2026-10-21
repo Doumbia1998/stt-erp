@@ -818,7 +818,7 @@ void main() {
           .widget<Text>(find.byKey(const ValueKey('transitaire-invoice-total')))
           .data!
           .replaceAll(RegExp(r'\D'), ''),
-      '146000',
+      '236000',
     );
     expect(find.textContaining('Avance camion (BF 5295 MD)'), findsOneWidget);
     final reference = tester
@@ -917,7 +917,7 @@ void main() {
           .widget<TextFormField>(find.byKey(const ValueKey('payment-amount')))
           .controller!
           .text,
-      '146000',
+      '236000',
     );
     await tester.tap(find.byKey(const ValueKey('payment-save')));
     await tester.pumpAndSettle();

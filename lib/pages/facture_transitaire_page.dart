@@ -1121,7 +1121,10 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
     return rows;
   }
 
-  double get _total => _lines.fold(0, (s, l) => s + l.montant);
+  double get _fees => _lines.fold(0, (s, l) => s + l.montant);
+  double get _advances => _lines.fold(0, (s, l) => s + l.avanceCamion);
+  // L'avance camion versée par le transitaire s'ajoute à ses frais.
+  double get _total => _fees + _advances;
 
   static final _availableColumns = <ErpGridColumn<_AvailableContainer>>[
     ErpGridColumn(
@@ -1336,6 +1339,19 @@ class _FactureTransitaireEditorState extends State<_FactureTransitaireEditor>
                         ),
                       ),
                     ),
+                    if (_advances > 0) ...[
+                      const SizedBox(width: 12),
+                      Flexible(
+                        child: Text(
+                          'frais ${formatCurrency(_fees)} + avance camion ${formatCurrency(_advances)}',
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _gridMuted,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -2112,6 +2128,9 @@ Future<void> _printFactureTransitaire(
         ),
         pw.SizedBox(height: 12),
         _pdfTotals([
+          ('Total frais', '${formatCurrency(f.totalFrais)} FCFA'),
+          if (f.totalAvances > 0)
+            ('Avance camion', '${formatCurrency(f.totalAvances)} FCFA'),
           ('Total facture', '${formatCurrency(f.montant)} FCFA'),
           ('Total payé', '${formatCurrency(f.totalRegle)} FCFA'),
           ('Reliquat', '${formatCurrency(f.reliquat)} FCFA'),

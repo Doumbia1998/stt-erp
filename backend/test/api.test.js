@@ -630,7 +630,8 @@ test('carriers own trucks and transit invoices group several dossiers', async ()
   };
   const created = await call('PUT', '/factures-transitaire/ft-1', invoice);
   assert.equal(created.status, 200);
-  assert.equal(created.body.montant, 105000);
+  // Frais 45 000 + 50 000 + péage 2 × 5 000, plus les avances camion 2 × 100 000.
+  assert.equal(created.body.montant, 305000);
   assert.equal(created.body.version, 1);
 
   // Le même conteneur d'un dossier ne peut pas être facturé deux fois.
@@ -665,7 +666,7 @@ test('carriers own trucks and transit invoices group several dossiers', async ()
   const overpaid = await call('PUT', '/factures-transitaire/ft-1', {
     ...invoice,
     version: 2,
-    reglements: [payment, { ...payment, id: 'reg-2', montant: 50000 }],
+    reglements: [payment, { ...payment, id: 'reg-2', montant: 250000 }],
   });
   assert.equal(overpaid.status, 400);
   assert.equal((await call('DELETE', '/factures-transitaire/ft-1')).status, 409);
@@ -688,6 +689,9 @@ test('carriers own trucks and transit invoices group several dossiers', async ()
   });
   const purchases = await call('GET', '/comptabilite/ecritures?journal=ACH&mois=2026-10');
   assert.ok(purchases.body.some((l) => l.piece === 'FAC-TRS-1026-0101' && l.debit === 105000));
+  // L'avance camion est portée au débit du transporteur, le transitaire crédité du total.
+  assert.ok(purchases.body.some((l) => l.piece === 'FAC-TRS-1026-0101' && l.debit === 200000));
+  assert.ok(purchases.body.some((l) => l.piece === 'FAC-TRS-1026-0101' && l.credit === 305000));
   const bank = await call('GET', '/comptabilite/ecritures?journal=BQ&mois=2026-10');
   assert.ok(bank.body.some((l) => l.piece === 'FAC-TRS-1026-0101' && l.credit === 60000));
 });

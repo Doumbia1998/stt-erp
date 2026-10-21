@@ -147,9 +147,25 @@ async function buildEntries(client, du, au, categories) {
     [du, au],
   );
   if (wanted.has('transit')) {
+    // Avances camion de chaque facture, par transporteur : elles diminuent sa dette.
+    const { rows: advances } = await client.query(
+      `SELECT l.facture_id, SUM(l.avance_camion) AS avance, p.entreprise, p.compte_comptable
+       FROM facture_transitaire_lignes l LEFT JOIN prestataires p ON p.id = l.transporteur_id
+       WHERE l.avance_camion > 0
+       GROUP BY l.facture_id, p.id, p.entreprise, p.compte_comptable`,
+    );
     for (const f of transitInvoices) {
       const amount = round(f.montant);
       const nom = f.entreprise || 'Transitaire';
+      const advanceLines = advances
+        .filter((a) => a.facture_id === f.id)
+        .map((a) => ({
+          compte: a.compte_comptable || COMPTES.fournisseurs,
+          libelle: `Avance camion • ${a.entreprise || 'Transporteur'}`,
+          debit: round(Number(a.avance)),
+          credit: 0,
+        }));
+      const fees = round(amount - advanceLines.reduce((s, l) => s + l.debit, 0));
       push({
         journal: JOURNAUX.achats.code,
         categorie: 'transit',
@@ -158,7 +174,10 @@ async function buildEntries(client, du, au, categories) {
         libelle: `Frais de transit ${f.reference} • ${nom}`,
         source: `facture-transitaire:${f.id}`,
         lines: [
-          { compte: COMPTES.fraisTransit, libelle: f.reference, debit: amount, credit: 0 },
+          ...(fees > 0
+            ? [{ compte: COMPTES.fraisTransit, libelle: f.reference, debit: fees, credit: 0 }]
+            : []),
+          ...advanceLines,
           { compte: f.compte_comptable || COMPTES.transitaires, libelle: nom, debit: 0, credit: amount },
         ],
       });

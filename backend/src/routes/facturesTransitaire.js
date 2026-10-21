@@ -121,7 +121,9 @@ function parseFacture(b) {
     version: b.version === undefined || b.version === null ? 0 : integer(b, 'version'),
     lignes,
     reglements,
-    montant: Math.round(lignes.reduce((s, l) => s + lineAmount(l), 0) * 100) / 100,
+    // L'avance camion payée par le transitaire lui est due en plus de ses frais.
+    montant:
+      Math.round(lignes.reduce((s, l) => s + lineAmount(l) + l.avanceCamion, 0) * 100) / 100,
   };
 }
 

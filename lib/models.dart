@@ -682,7 +682,11 @@ class FactureTransitaire {
   }) : lignes = lignes ?? [],
        reglements = reglements ?? [];
 
-  double get montant => lignes.fold(0, (s, l) => s + l.montant);
+  // Frais facturés par le transitaire (transit, surestaries, volume, autres, péage).
+  double get totalFrais => lignes.fold(0, (s, l) => s + l.montant);
+  // Avances camion versées par le transitaire : elles lui sont remboursées.
+  double get totalAvances => lignes.fold(0, (s, l) => s + l.avanceCamion);
+  double get montant => totalFrais + totalAvances;
   double get totalRegle => reglements.fold(0, (s, r) => s + r.montant);
   double get reliquat => montant - totalRegle;
   bool get estAcquittee => montant > 0 && reliquat <= 0.001;
