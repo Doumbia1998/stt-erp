@@ -300,6 +300,14 @@ class _VoyagesPageState extends State<VoyagesPage> {
       value: (v) => v.description,
     ),
     ErpGridColumn(label: 'Origine', width: 170, value: (v) => v.origine),
+    ErpGridColumn(
+      label: 'Affecté à',
+      width: 220,
+      value: (v) => _affectationsVoyage
+          .where((a) => a.voyageCle == v.id)
+          .map((a) => a.estSaisi ? '${a.module} ✓' : a.module)
+          .join(', '),
+    ),
   ];
 
   @override
@@ -431,6 +439,19 @@ class _VoyagesPageState extends State<VoyagesPage> {
           label: 'Modifier',
           icon: Icons.edit_rounded,
           onPressed: selected == null ? null : () => _edit(selected),
+        ),
+        ErpActionButton(
+          key: const ValueKey('voyage-assign'),
+          label: 'Affecter',
+          icon: Icons.assignment_ind_rounded,
+          color: const Color(0xFF15803D),
+          primary: true,
+          onPressed: selected == null
+              ? null
+              : () async {
+                  await _assignVoyage(context, selected);
+                  if (mounted) setState(() {});
+                },
         ),
         ErpActionButton(
           key: const ValueKey('voyage-export'),

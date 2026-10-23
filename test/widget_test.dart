@@ -901,6 +901,61 @@ void main() {
     await toggleDossierFilter();
     expect(inVoyages(find.text('TCLU0000003')), findsNothing);
     await toggleDossierFilter();
+
+    // Le responsable affecte le voyage à la Frontière ; l'agent saisit ses frais.
+    await tester.tap(inVoyages(find.text('BF 5295 MD')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('voyage-assign')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('voyage-assign-Frontière')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('voyage-assign-save')));
+    await tester.pumpAndSettle();
+    final affectation =
+        (erpBackend as MemoryErpBackend).affectationsVoyage.single;
+    expect(affectation.module, 'Frontière');
+    expect(affectation.plaque, 'BF 5295 MD');
+    expect(affectation.dossiers, 'STT-d1, STT-d2');
+    expect(inVoyages(find.text('Frontière')), findsOneWidget);
+
+    await tester.ensureVisible(find.byTooltip('Frontière'));
+    await tester.tap(find.byTooltip('Frontière'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Agent Frontière').last);
+    await tester.pumpAndSettle();
+    final border = find.byKey(const ValueKey('voyage-module-grid-Frontière'));
+    expect(
+      find.descendant(of: border, matching: find.text('À saisir')),
+      findsOneWidget,
+    );
+    await tester.tap(find.descendant(of: border, matching: find.text('Issa')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('voyage-fees-edit')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('voyage-fee-T1')),
+      '25000',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('voyage-fee-Frais de passage')),
+      '10000',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('voyage-fees-save')));
+    await tester.pumpAndSettle();
+    expect(affectation.total, 35000);
+    expect(affectation.frais['T1'], 25000);
+    expect(
+      find.descendant(of: border, matching: find.text('Saisi')),
+      findsOneWidget,
+    );
+    await tester.ensureVisible(find.byTooltip('Transport'));
+    await tester.tap(find.byTooltip('Transport'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Voyages').last);
+    await tester.pumpAndSettle();
     expect(inVoyages(find.text('TCLU0000003')), findsOneWidget);
     await tester.ensureVisible(find.byTooltip('Prestation'));
     await tester.tap(find.byTooltip('Prestation'));

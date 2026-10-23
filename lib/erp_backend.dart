@@ -31,6 +31,8 @@ class ErpData {
   final List<TypeFrais> typesFrais;
   final List<FactureTransitaire> facturesTransitaire;
   final List<FactureTransporteur> facturesTransporteur;
+  final List<AffectationVoyage> affectationsVoyage;
+  final List<AgentVoyage> agentsVoyage;
 
   const ErpData({
     required this.user,
@@ -45,6 +47,8 @@ class ErpData {
     this.typesFrais = const [],
     this.facturesTransitaire = const [],
     this.facturesTransporteur = const [],
+    this.affectationsVoyage = const [],
+    this.agentsVoyage = const [],
   });
 }
 
@@ -149,6 +153,10 @@ abstract class ErpBackend {
   Future<void> deleteFactureTransitaire(FactureTransitaire facture);
   Future<void> saveFactureTransporteur(FactureTransporteur facture);
   Future<void> deleteFactureTransporteur(FactureTransporteur facture);
+
+  // Voyages affectés aux modules Frontière, Bureau DD et Enquête.
+  Future<void> saveAffectationVoyage(AffectationVoyage affectation);
+  Future<void> deleteAffectationVoyage(AffectationVoyage affectation);
 
   // Comptabilité générée depuis la gestion.
   Future<MiseAJourResultat> miseAJourComptable({
@@ -263,6 +271,14 @@ class HttpErpBackend implements ErpBackend {
               .cast<Map<String, dynamic>>()
               .map(factureTransporteurFromJson)
               .toList(),
+      affectationsVoyage: ((json['affectationsVoyage'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(affectationVoyageFromJson)
+          .toList(),
+      agentsVoyage: ((json['agentsVoyage'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(agentVoyageFromJson)
+          .toList(),
       dossiers: [
         for (final dossier in rows('dossiers'))
           dossierFromJson(
@@ -392,6 +408,25 @@ class HttpErpBackend implements ErpBackend {
   @override
   Future<void> deleteFactureTransporteur(FactureTransporteur facture) =>
       _send('DELETE', '/factures-transporteur/${_segment(facture.id)}');
+
+  @override
+  Future<void> saveAffectationVoyage(AffectationVoyage affectation) async {
+    final result = await _send(
+      'PUT',
+      '/voyage-affectations/${_segment(affectation.id)}',
+      affectationVoyageToJson(affectation),
+    );
+    affectation
+      ..version = (result['version'] as num).toInt()
+      ..agentId = result['agentId'] as String? ?? affectation.agentId
+      ..assignePar = result['assignePar'] as String? ?? ''
+      ..saisiPar = result['saisiPar'] as String? ?? ''
+      ..saisiLe = result['saisiLe'] as String? ?? '';
+  }
+
+  @override
+  Future<void> deleteAffectationVoyage(AffectationVoyage affectation) =>
+      _send('DELETE', '/voyage-affectations/${_segment(affectation.id)}');
 
   @override
   Future<MiseAJourResultat> miseAJourComptable({
@@ -531,6 +566,8 @@ class MemoryErpBackend implements ErpBackend {
   final List<TypeFrais> typesFrais = [];
   final List<FactureTransitaire> facturesTransitaire = [];
   final List<FactureTransporteur> facturesTransporteur = [];
+  final List<AffectationVoyage> affectationsVoyage = [];
+  final List<AgentVoyage> agentsVoyage = [];
   final Map<String, String> _passwords = {};
 
   MemoryErpBackend({String adminPassword = '1234'})
@@ -549,6 +586,9 @@ class MemoryErpBackend implements ErpBackend {
             'Transitaire',
             'Comptabilité',
             'RH & Paie',
+            'Frontière',
+            'Bureau DD',
+            'Enquête',
           },
         ),
       ] {
@@ -596,6 +636,8 @@ class MemoryErpBackend implements ErpBackend {
       typesFrais: [...typesFrais],
       facturesTransitaire: [...facturesTransitaire],
       facturesTransporteur: [...facturesTransporteur],
+      affectationsVoyage: [...affectationsVoyage],
+      agentsVoyage: [...agentsVoyage],
     );
   }
 
@@ -723,6 +765,31 @@ class MemoryErpBackend implements ErpBackend {
   @override
   Future<void> deleteFactureTransporteur(FactureTransporteur facture) async =>
       facturesTransporteur.removeWhere((f) => f.id == facture.id);
+
+  @override
+  Future<void> saveAffectationVoyage(AffectationVoyage affectation) async {
+    if (affectationsVoyage.any(
+      (a) =>
+          a.id != affectation.id &&
+          a.voyageCle == affectation.voyageCle &&
+          a.module == affectation.module,
+    )) {
+      throw const ErpBackendException(
+        'Ce voyage est déjà affecté à ce module.',
+        status: 409,
+      );
+    }
+    affectation.version += 1;
+    if (affectation.assignePar.isEmpty) {
+      affectation.assignePar = _user?.name ?? '';
+    }
+    if (affectation.estSaisi) affectation.saisiPar = _user?.name ?? '';
+    _upsert(affectationsVoyage, affectation, (a) => a.id == affectation.id);
+  }
+
+  @override
+  Future<void> deleteAffectationVoyage(AffectationVoyage affectation) async =>
+      affectationsVoyage.removeWhere((a) => a.id == affectation.id);
 
   // La version en mémoire n'a pas de comptabilité : rien à déverser.
   @override

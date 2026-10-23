@@ -16,6 +16,9 @@ const MODULES = [
   'Transitaire',
   'Comptabilité',
   'RH & Paie',
+  'Frontière',
+  'Bureau DD',
+  'Enquête',
 ];
 
 // Sert à comparer un mot de passe même quand l'identifiant n'existe pas (temps constant).

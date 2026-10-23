@@ -93,7 +93,7 @@ test('login rejects wrong credentials and protects data routes', async () => {
   });
   assert.equal(ok.status, 200);
   assert.equal(ok.body.utilisateur.role, 'Administrateur');
-  assert.equal(ok.body.utilisateur.modules.length, 7);
+  assert.equal(ok.body.utilisateur.modules.length, 10);
   token = ok.body.jeton;
 });
 
@@ -808,4 +808,79 @@ test('a carrier invoice can carry an agreed total without containers', async () 
   assert.equal(empty.status, 400);
   const data = await call('GET', '/donnees');
   assert.equal(data.body.facturesTransporteur.find((f) => f.id === 'ftp-3').montant, 2400000);
+});
+
+test('voyages are assigned to Frontière, Bureau DD and Enquête agents', async () => {
+  const admin = await call('GET', '/donnees');
+  assert.ok(admin.body.utilisateur.modules.includes('Frontière'));
+  await call('PUT', '/utilisateurs/agent-f', {
+    nom: 'Agent Frontière',
+    identifiant: 'frontiere',
+    role: 'Agent',
+    modules: ['Frontière'],
+    motDePasse: 'frontiere-2026',
+  });
+  const agentToken = (
+    await call('POST', '/auth/connexion', { identifiant: 'frontiere', motDePasse: 'frontiere-2026' })
+  ).body.jeton;
+
+  const affectation = {
+    voyageCle: 'AB1234MD|15/10/2026',
+    module: 'Frontière',
+    agentId: 'agent-f',
+    dateDepart: '15/10/2026',
+    plaque: 'ab 1234 md',
+    transporteur: 'SOSAF',
+    chauffeur: 'Moussa',
+    telephone: '70000001',
+    dossiers: 'STT-1',
+    clients: 'Client Test',
+    transitaire: 'EAT - BOUARE',
+    conteneurs: 'MSKU1234567',
+  };
+  // L'agent ne crée pas d'affectation : c'est le responsable des voyages.
+  assert.equal(
+    (await call('PUT', '/voyage-affectations/aff-1', affectation, agentToken)).status,
+    403,
+  );
+  const created = await call('PUT', '/voyage-affectations/aff-1', affectation);
+  assert.equal(created.status, 200);
+  assert.equal(created.body.plaque, 'AB 1234 MD');
+  assert.equal(created.body.total, 0);
+  assert.equal(
+    (await call('PUT', '/voyage-affectations/aff-2', affectation)).status,
+    409,
+  );
+
+  const data = await call('GET', '/donnees', undefined, agentToken);
+  assert.equal(data.body.affectationsVoyage.length, 1);
+  assert.ok(data.body.agentsVoyage.some((a) => a.id === 'agent-f'));
+
+  // L'agent saisit les frais de son module, pas ceux d'un autre.
+  const wrong = await call(
+    'PUT',
+    '/voyage-affectations/aff-1',
+    { ...affectation, version: 1, frais: { LS: 1000 } },
+    agentToken,
+  );
+  assert.equal(wrong.status, 400);
+  const saisie = await call(
+    'PUT',
+    '/voyage-affectations/aff-1',
+    { ...affectation, agentId: '', version: 1, frais: { T1: 25000, 'Frais de passage': 10000 } },
+    agentToken,
+  );
+  assert.equal(saisie.status, 200);
+  assert.equal(saisie.body.total, 35000);
+  assert.equal(saisie.body.saisiPar, 'Agent Frontière');
+  // L'agent ne peut pas retirer l'agent affecté.
+  assert.equal(saisie.body.agentId, 'agent-f');
+  const enquete = await call(
+    'PUT',
+    '/voyage-affectations/aff-3',
+    { ...affectation, module: 'Enquête' },
+    agentToken,
+  );
+  assert.equal(enquete.status, 403);
+  assert.equal((await call('DELETE', '/voyage-affectations/aff-1')).status, 409);
 });

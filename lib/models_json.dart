@@ -582,3 +582,53 @@ Map<String, dynamic> factureTransporteurToJson(FactureTransporteur f) => {
       },
   ],
 };
+
+AffectationVoyage affectationVoyageFromJson(Map<String, dynamic> json) =>
+    AffectationVoyage(
+      id: json['id'] as String,
+      voyageCle: json['voyageCle'] as String? ?? '',
+      module: json['module'] as String? ?? '',
+      agentId: json['agentId'] as String? ?? '',
+      dateDepart: json['dateDepart'] as String? ?? '',
+      plaque: json['plaque'] as String? ?? '',
+      transporteur: json['transporteur'] as String? ?? '',
+      chauffeur: json['chauffeur'] as String? ?? '',
+      telephone: json['telephone'] as String? ?? '',
+      dossiers: json['dossiers'] as String? ?? '',
+      clients: json['clients'] as String? ?? '',
+      transitaire: json['transitaire'] as String? ?? '',
+      conteneurs: json['conteneurs'] as String? ?? '',
+      frais: {
+        for (final e in ((json['frais'] as Map?) ?? const {}).entries)
+          e.key as String: _num(e.value),
+      },
+      observations: json['observations'] as String? ?? '',
+      assignePar: json['assignePar'] as String? ?? '',
+      saisiPar: json['saisiPar'] as String? ?? '',
+      saisiLe: json['saisiLe'] as String? ?? '',
+      version: (json['version'] as num?)?.toInt() ?? 0,
+    );
+
+Map<String, dynamic> affectationVoyageToJson(AffectationVoyage a) => {
+  'voyageCle': a.voyageCle,
+  'module': a.module,
+  'agentId': a.agentId,
+  'dateDepart': a.dateDepart,
+  'plaque': a.plaque,
+  'transporteur': a.transporteur,
+  'chauffeur': a.chauffeur,
+  'telephone': a.telephone,
+  'dossiers': a.dossiers,
+  'clients': a.clients,
+  'transitaire': a.transitaire,
+  'conteneurs': a.conteneurs,
+  'frais': a.frais,
+  'observations': a.observations,
+  'version': a.version,
+};
+
+AgentVoyage agentVoyageFromJson(Map<String, dynamic> json) => AgentVoyage(
+  id: json['id'] as String,
+  nom: json['nom'] as String? ?? '',
+  modules: {...((json['modules'] as List?) ?? const []).cast<String>()},
+);

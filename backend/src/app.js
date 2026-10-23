@@ -21,6 +21,10 @@ const {
   loadFacturesTransporteur,
 } = require('./routes/facturesTransporteur');
 const { dossiersRouter, loadDossiers } = require('./routes/dossiers');
+const {
+  voyageAffectationsRouter,
+  loadAffectations,
+} = require('./routes/voyageAffectations');
 
 function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
   const app = express();
@@ -103,7 +107,7 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
   api.get('/donnees', async (req, res, next) => {
     try {
       const [clients, prestataires, comptes, journaux, voyages, dossiers, users, modes, frais,
-        vehicules, facturesTransitaire, facturesTransporteur] =
+        vehicules, facturesTransitaire, facturesTransporteur, affectations, agents] =
         await Promise.all([
           pool.query('SELECT * FROM clients ORDER BY cree_le, id'),
           pool.query('SELECT * FROM prestataires ORDER BY cree_le, id'),
@@ -119,6 +123,13 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
           pool.query('SELECT * FROM vehicules ORDER BY transporteur_id, position'),
           loadFacturesTransitaire(pool),
           loadFacturesTransporteur(pool),
+          loadAffectations(pool),
+          // Agents des modules voyage, proposés à l'affectation (sans données sensibles).
+          pool.query(
+            `SELECT id, nom, modules FROM utilisateurs
+             WHERE modules && ARRAY['Frontière', 'Bureau DD', 'Enquête']
+             ORDER BY lower(nom)`,
+          ),
         ]);
       const vehiculesBy = new Map();
       for (const v of vehicules.rows) {
@@ -139,6 +150,8 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
         typesFrais: frais.rows.map(typeFraisJson),
         facturesTransitaire,
         facturesTransporteur,
+        affectationsVoyage: affectations,
+        agentsVoyage: agents.rows.map((a) => ({ id: a.id, nom: a.nom, modules: a.modules })),
         dossiers,
       });
     } catch (error) {
@@ -151,6 +164,7 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
   api.use(comptabiliteRouter(pool));
   api.use(facturesTransitaireRouter(pool));
   api.use(facturesTransporteurRouter(pool));
+  api.use(voyageAffectationsRouter(pool));
   app.use('/api/v1', api);
 
   app.use((_req, res) => {

@@ -27,6 +27,7 @@ part 'pages/facture_transitaire_page.dart';
 part 'pages/facture_transporteur_page.dart';
 part 'pages/frais_caisse_pages.dart';
 part 'pages/transporteurs_page.dart';
+part 'pages/voyage_modules_page.dart';
 part 'pages/voyages_page.dart';
 part 'widgets/erp_documents.dart';
 part 'widgets/erp_grid.dart';
@@ -124,6 +125,8 @@ final List<ModeReglement> _modesReglement = [];
 final List<TypeFrais> _typesFrais = [];
 final List<FactureTransitaire> _facturesTransitaire = [];
 final List<FactureTransporteur> _facturesTransporteur = [];
+final List<AffectationVoyage> _affectationsVoyage = [];
+final List<AgentVoyage> _agentsVoyage = [];
 
 void _loadErpData(ErpData data) {
   _currentUser = data.user;
@@ -160,6 +163,12 @@ void _loadErpData(ErpData data) {
   _facturesTransporteur
     ..clear()
     ..addAll(data.facturesTransporteur);
+  _affectationsVoyage
+    ..clear()
+    ..addAll(data.affectationsVoyage);
+  _agentsVoyage
+    ..clear()
+    ..addAll(data.agentsVoyage);
 }
 
 class TransitTrackerApp extends StatelessWidget {
@@ -577,6 +586,9 @@ class MainNavigationPage extends StatefulWidget {
       'Transitaire',
       'Comptabilité',
       'RH & Paie',
+      'Frontière',
+      'Bureau DD',
+      'Enquête',
     },
   });
   @override
@@ -615,6 +627,15 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       ErpMenuItem('Voyages', Icons.route_rounded),
       ErpMenuItem('Transporteurs', Icons.local_shipping_outlined),
       ErpMenuItem('Historique', Icons.history_rounded),
+    ]),
+    ErpModule('Frontière', Icons.signpost_rounded, [
+      ErpMenuItem('Agent Frontière', Icons.signpost_rounded),
+    ]),
+    ErpModule('Bureau DD', Icons.local_police_rounded, [
+      ErpMenuItem('Bureau des Douanes (DD)', Icons.local_police_rounded),
+    ]),
+    ErpModule('Enquête', Icons.manage_search_rounded, [
+      ErpMenuItem('Enquêtes', Icons.manage_search_rounded),
     ]),
     ErpModule('Transitaire', Icons.directions_boat_rounded, [
       ErpMenuItem('Gestion des Transitaires & Chargeurs', Icons.groups_rounded),
@@ -873,6 +894,18 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           prestataires: _prestataires,
           comptes: _planAccounts,
         );
+      case 'Agent Frontière':
+        return const VoyageModulePage(
+          module: 'Frontière',
+          title: 'Agent Frontière',
+        );
+      case 'Bureau des Douanes (DD)':
+        return const VoyageModulePage(
+          module: 'Bureau DD',
+          title: 'Bureau des Douanes (DD)',
+        );
+      case 'Enquêtes':
+        return const VoyageModulePage(module: 'Enquête', title: 'Enquêtes');
       case 'Voyages':
         return VoyagesPage(
           dossiers: _dossiers,

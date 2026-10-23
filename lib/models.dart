@@ -751,3 +751,71 @@ class FactureTransporteur {
   double get reliquat => netAPayer - totalRegle;
   bool get estPayee => montant > 0 && reliquat <= 0.001;
 }
+
+// Frais saisis par chaque module sur un voyage qui lui est affecté.
+const fraisParModuleVoyage = <String, List<String>>{
+  'Frontière': ['T1', 'Frais de passage', 'TS Frontière', 'Client'],
+  'Bureau DD': ['Frais de circuit', 'DD conteneur ou camion', 'TS'],
+  'Enquête': ['Amende', 'LS', 'TS spécial', 'TS ordinaire'],
+};
+
+// Voyage confié à un module (Frontière, Bureau DD, Enquête) et frais de l'agent.
+class AffectationVoyage {
+  final String id;
+  final String voyageCle;
+  final String module;
+  String agentId;
+  final String dateDepart;
+  final String plaque;
+  final String transporteur;
+  final String chauffeur;
+  final String telephone;
+  final String dossiers;
+  final String clients;
+  final String transitaire;
+  final String conteneurs;
+  Map<String, double> frais;
+  String observations;
+  String assignePar;
+  String saisiPar;
+  String saisiLe;
+  int version;
+
+  AffectationVoyage({
+    required this.id,
+    required this.voyageCle,
+    required this.module,
+    this.agentId = '',
+    this.dateDepart = '',
+    this.plaque = '',
+    this.transporteur = '',
+    this.chauffeur = '',
+    this.telephone = '',
+    this.dossiers = '',
+    this.clients = '',
+    this.transitaire = '',
+    this.conteneurs = '',
+    Map<String, double>? frais,
+    this.observations = '',
+    this.assignePar = '',
+    this.saisiPar = '',
+    this.saisiLe = '',
+    this.version = 0,
+  }) : frais = frais ?? {};
+
+  double get total => frais.values.fold(0, (s, v) => s + v);
+  bool get estSaisi => total > 0;
+}
+
+// Utilisateur d'un module voyage, proposé comme agent à l'affectation.
+class AgentVoyage {
+  final String id;
+  final String nom;
+  final Set<String> modules;
+
+  const AgentVoyage({
+    required this.id,
+    required this.nom,
+    required this.modules,
+  });
+}
