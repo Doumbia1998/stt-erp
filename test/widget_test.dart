@@ -917,7 +917,8 @@ void main() {
     expect(affectation.module, 'Frontière');
     expect(affectation.plaque, 'BF 5295 MD');
     expect(affectation.dossiers, 'STT-d1, STT-d2');
-    expect(inVoyages(find.text('Frontière')), findsOneWidget);
+    expect(find.text('Frontière en cours (1)'), findsOneWidget);
+    expect(inVoyages(find.text('À saisir')), findsOneWidget);
 
     Future<void> openMenu(String module, String item) async {
       await tester.ensureVisible(find.byTooltip(module));
@@ -1034,6 +1035,33 @@ void main() {
     await tester.tap(find.text('Voyages').last);
     await tester.pumpAndSettle();
     expect(inVoyages(find.text('TCLU0000003')), findsOneWidget);
+    // Frontière validée : le voyage passe à l'étape suivante, le Bureau DD s'affecte.
+    await tester.tap(
+      find.byKey(const ValueKey('voyage-stage-frontiereValidee')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Frontière validée (1)'), findsOneWidget);
+    await tester.tap(inVoyages(find.text('BF 5295 MD')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('voyage-assign')));
+    await tester.pumpAndSettle();
+    // L'Enquête attend la validation du Bureau DD.
+    expect(
+      tester
+          .widget<CheckboxListTile>(
+            find.byKey(const ValueKey('voyage-assign-Enquête')),
+          )
+          .onChanged,
+      isNull,
+    );
+    await tester.tap(find.byKey(const ValueKey('voyage-assign-Bureau DD')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('voyage-assign-save')));
+    await tester.pumpAndSettle();
+    expect(find.text('Bureau DD en cours (1)'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('voyage-stage-all')));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.byTooltip('Prestation'));
     await tester.tap(find.byTooltip('Prestation'));
     await tester.pumpAndSettle();

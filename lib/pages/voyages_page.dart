@@ -195,6 +195,8 @@ class _VoyagesPageState extends State<VoyagesPage> {
   int? _treeYear;
   int? _treeMonth;
   _VoyageRow? _selected;
+  // Onglet d'étape du circuit (null : tous les voyages).
+  _VoyageEtape? _etape;
   bool _refreshing = false;
 
   List<_VoyageRow> get _all => _buildVoyages(
@@ -204,9 +206,10 @@ class _VoyagesPageState extends State<VoyagesPage> {
     voyages: widget.voyages,
   );
 
-  List<_VoyageRow> _filter(List<_VoyageRow> rows) {
+  List<_VoyageRow> _filter(List<_VoyageRow> rows, {bool byStage = true}) {
     final query = _query.trim().toLowerCase();
     return rows.where((v) {
+      if (byStage && _etape != null && _etapeOf(v.id) != _etape) return false;
       final date = v.date;
       if (!_inPeriod(date, _from, _to)) return false;
       if (_treeYear != null && date?.year != _treeYear) return false;
@@ -301,13 +304,26 @@ class _VoyagesPageState extends State<VoyagesPage> {
     ),
     ErpGridColumn(label: 'Origine', width: 170, value: (v) => v.origine),
     ErpGridColumn(
-      label: 'Affecté à',
-      width: 220,
-      value: (v) => _affectationsVoyage
-          .where((a) => a.voyageCle == v.id)
-          .map((a) => a.estSaisi ? '${a.module} ✓' : a.module)
-          .join(', '),
+      label: 'Étape',
+      width: 170,
+      value: (v) => _etapeOf(v.id).label,
+      builder: (v) {
+        final etape = _etapeOf(v.id);
+        return ErpStatusChip(etape.label, etape.color);
+      },
     ),
+    for (final module in fraisParModuleVoyage.keys)
+      ErpGridColumn(
+        label: module,
+        width: 120,
+        value: (v) => _moduleStatus(v.id, module),
+        builder: (v) {
+          final status = _moduleStatus(v.id, module);
+          return status.isEmpty
+              ? const Text('—', style: TextStyle(color: _gridMuted))
+              : ErpStatusChip(status, _moduleStatusColor(status));
+        },
+      ),
   ];
 
   @override
@@ -338,6 +354,8 @@ class _VoyagesPageState extends State<VoyagesPage> {
             _buildToolbar(selected, rows),
             const SizedBox(height: 12),
             _buildFilterBar(rows.length),
+            const SizedBox(height: 12),
+            _buildStages(_filter(all, byStage: false)),
             const SizedBox(height: 12),
           ];
           if (!wide) {
@@ -477,6 +495,64 @@ class _VoyagesPageState extends State<VoyagesPage> {
       ],
     ),
   );
+
+  // Onglets du circuit : où en est chaque voyage (Frontière, Bureau DD, Enquête).
+  Widget _buildStages(List<_VoyageRow> rows) {
+    final counts = <_VoyageEtape, int>{};
+    for (final v in rows) {
+      final etape = _etapeOf(v.id);
+      counts[etape] = (counts[etape] ?? 0) + 1;
+    }
+    Widget chip(
+      String key,
+      String label,
+      int count,
+      bool selected,
+      Color color,
+      VoidCallback onTap,
+    ) => ChoiceChip(
+      key: ValueKey(key),
+      label: Text('$label ($count)'),
+      selected: selected,
+      showCheckmark: false,
+      selectedColor: color.withValues(alpha: 0.16),
+      side: BorderSide(color: selected ? color : _gridBorder),
+      labelStyle: TextStyle(
+        color: selected ? color : _gridText,
+        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+      ),
+      onSelected: (_) => onTap(),
+    );
+    return _card(
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          chip(
+            'voyage-stage-all',
+            'Tous',
+            rows.length,
+            _etape == null,
+            _gridAccent,
+            () => setState(() => _etape = null),
+          ),
+          for (final etape in _VoyageEtape.values)
+            chip(
+              'voyage-stage-${etape.name}',
+              etape.label,
+              counts[etape] ?? 0,
+              _etape == etape,
+              etape.color,
+              () => setState(() {
+                _etape = etape;
+                _selected = null;
+              }),
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildFilterBar(int count) {
     Widget dropdown<T extends Object>(

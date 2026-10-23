@@ -11,6 +11,8 @@ const FRAIS_PAR_MODULE = {
   Enquête: ['Amende', 'LS', 'TS spécial', 'TS ordinaire'],
 };
 const MODULES_VOYAGE = Object.keys(FRAIS_PAR_MODULE);
+// Circuit d'un voyage : chaque étape suit la validation de la précédente.
+const ETAPE_PRECEDENTE = { 'Bureau DD': 'Frontière', Enquête: 'Bureau DD' };
 // Seule la Frontière joint une photo : le T1.
 const MODULES_AVEC_T1 = ['Frontière'];
 const MAX_IMAGE_CHARS = 4 * 1024 * 1024;
@@ -161,6 +163,17 @@ function voyageAffectationsRouter(pool) {
           if (!existing) {
             // Seul le responsable des voyages crée une affectation.
             if (!responsable) throw forbidden('Seul le responsable des voyages peut affecter un voyage.');
+            const voyageCle = text(b, 'voyageCle', { required: true, max: 200 });
+            const precedente = ETAPE_PRECEDENTE[module];
+            if (precedente) {
+              const { rows: prev } = await client.query(
+                'SELECT statut FROM voyage_affectations WHERE voyage_cle = $1 AND module = $2',
+                [voyageCle, precedente],
+              );
+              if (prev[0]?.statut !== 'Validé') {
+                throw badRequest(`Le voyage doit d'abord être validé par : ${precedente}.`);
+              }
+            }
             const { rows: created } = await client.query(
               `INSERT INTO voyage_affectations (id, voyage_cle, module, agent_id, date_depart, plaque,
                  transporteur, chauffeur, telephone, dossiers, clients, transitaire, conteneurs,
@@ -169,7 +182,7 @@ function voyageAffectationsRouter(pool) {
                RETURNING ${COLUMNS}`,
               [
                 id,
-                text(b, 'voyageCle', { required: true, max: 200 }),
+                voyageCle,
                 module,
                 optionalRef(b, 'agentId'),
                 frDateToSql(b.dateDepart, 'dateDepart'),

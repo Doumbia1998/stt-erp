@@ -828,6 +828,21 @@ class MemoryErpBackend implements ErpBackend {
     final stored = affectationsVoyage
         .where((a) => a.id == affectation.id)
         .firstOrNull;
+    const previous = {'Bureau DD': 'Frontière', 'Enquête': 'Bureau DD'};
+    final before = previous[affectation.module];
+    if (stored == null &&
+        before != null &&
+        !affectationsVoyage.any(
+          (a) =>
+              a.voyageCle == affectation.voyageCle &&
+              a.module == before &&
+              a.estValide,
+        )) {
+      throw ErpBackendException(
+        "Le voyage doit d'abord être validé par : $before.",
+        status: 400,
+      );
+    }
     if (stored != null && stored.estValide && !identical(stored, affectation)) {
       throw const ErpBackendException(
         'Cette saisie est validée : elle ne peut plus être modifiée.',

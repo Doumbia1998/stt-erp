@@ -900,6 +900,15 @@ test('voyages are assigned to Frontière, Bureau DD and Enquête agents', async 
     403,
   );
   assert.equal((await call('DELETE', '/voyage-affectations/aff-1')).status, 409);
+  // Circuit : le Bureau DD après la Frontière validée, l'Enquête après le Bureau DD.
+  assert.equal(
+    (await call('PUT', '/voyage-affectations/aff-4', { ...affectation, module: 'Enquête' })).status,
+    400,
+  );
+  assert.equal(
+    (await call('PUT', '/voyage-affectations/aff-5', { ...affectation, module: 'Bureau DD' })).status,
+    200,
+  );
 
   // L'agent facture ses saisies validées ; la Direction règle la facture.
   const invoice = {

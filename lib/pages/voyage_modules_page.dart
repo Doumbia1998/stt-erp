@@ -19,6 +19,65 @@ const _orange = Color(0xFFEA580C);
 const _green = Color(0xFF15803D);
 const _blue = Color(0xFF2563EB);
 
+// Circuit d'un voyage : Frontière, puis Bureau DD, puis Enquête (Livraison à venir).
+const _etapePrecedente = <String, String>{
+  'Bureau DD': 'Frontière',
+  'Enquête': 'Bureau DD',
+};
+
+enum _VoyageEtape {
+  aAffecter('À affecter Frontière', Color(0xFF64748B)),
+  frontiere('Frontière en cours', _orange),
+  frontiereValidee('Frontière validée', _green),
+  bureauDd('Bureau DD en cours', _orange),
+  ddValide('Bureau DD validé', _green),
+  enquete('Enquête en cours', _orange),
+  termine('Enquête validée', _blue);
+
+  final String label;
+  final Color color;
+
+  const _VoyageEtape(this.label, this.color);
+}
+
+AffectationVoyage? _affectationOf(String voyageCle, String module) =>
+    _affectationsVoyage
+        .where((a) => a.voyageCle == voyageCle && a.module == module)
+        .firstOrNull;
+
+_VoyageEtape _etapeOf(String voyageCle) {
+  final enquete = _affectationOf(voyageCle, 'Enquête');
+  if (enquete != null) {
+    return enquete.estValide ? _VoyageEtape.termine : _VoyageEtape.enquete;
+  }
+  final dd = _affectationOf(voyageCle, 'Bureau DD');
+  if (dd != null) {
+    return dd.estValide ? _VoyageEtape.ddValide : _VoyageEtape.bureauDd;
+  }
+  final frontiere = _affectationOf(voyageCle, 'Frontière');
+  if (frontiere != null) {
+    return frontiere.estValide
+        ? _VoyageEtape.frontiereValidee
+        : _VoyageEtape.frontiere;
+  }
+  return _VoyageEtape.aAffecter;
+}
+
+// Où en est un module sur un voyage : vide, à saisir, saisi, validé.
+String _moduleStatus(String voyageCle, String module) {
+  final a = _affectationOf(voyageCle, module);
+  if (a == null) return '';
+  if (a.estValide) return 'Validé';
+  return a.estSaisi ? 'Saisi' : 'À saisir';
+}
+
+Color _moduleStatusColor(String status) => switch (status) {
+  'Validé' => _green,
+  'Saisi' => _blue,
+  'À saisir' => _orange,
+  _ => _gridMuted,
+};
+
 String _agentName(String id) {
   if (id.isEmpty) return '';
   return _agentsVoyage.where((a) => a.id == id).firstOrNull?.nom ??
@@ -258,6 +317,12 @@ class _AffectationDialogState extends State<_AffectationDialog> {
   Widget _moduleTile(String module) {
     final current = _current(module);
     final locked = current != null && (current.estSaisi || current.estValide);
+    // Une étape s'affecte après la validation de la précédente.
+    final previous = _etapePrecedente[module];
+    final waiting =
+        current == null &&
+        previous != null &&
+        !(_current(previous)?.estValide ?? false);
     final agents = _agentsVoyage
         .where((a) => a.modules.contains(module))
         .toList();
@@ -285,13 +350,15 @@ class _AffectationDialogState extends State<_AffectationDialog> {
             subtitle: Text(
               locked
                   ? 'Frais déjà saisis (${_amountText(current.total)}) : affectation verrouillée'
+                  : waiting
+                  ? 'Disponible après la validation : $previous'
                   : [
                       if (modulesAvecT1.contains(module)) 'T1 (photo)',
                       ...fraisParModuleVoyage[module]!,
                     ].join(' • '),
               style: const TextStyle(fontSize: 12),
             ),
-            onChanged: locked
+            onChanged: locked || waiting
                 ? null
                 : (value) => setState(() => _checked[module] = value ?? false),
           ),
