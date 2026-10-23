@@ -816,7 +816,7 @@ test('voyages are assigned to Frontière, Bureau DD and Enquête agents', async 
   await call('PUT', '/utilisateurs/agent-f', {
     nom: 'Agent Frontière',
     identifiant: 'frontiere',
-    role: 'Agent',
+    role: 'Agent Frontière',
     modules: ['Frontière'],
     motDePasse: 'frontiere-2026',
   });
@@ -846,7 +846,7 @@ test('voyages are assigned to Frontière, Bureau DD and Enquête agents', async 
   const created = await call('PUT', '/voyage-affectations/aff-1', affectation);
   assert.equal(created.status, 200);
   assert.equal(created.body.plaque, 'AB 1234 MD');
-  assert.equal(created.body.total, 0);
+  assert.equal(created.body.statut, 'Brouillon');
   assert.equal(
     (await call('PUT', '/voyage-affectations/aff-2', affectation)).status,
     409,
@@ -856,31 +856,79 @@ test('voyages are assigned to Frontière, Bureau DD and Enquête agents', async 
   assert.equal(data.body.affectationsVoyage.length, 1);
   assert.ok(data.body.agentsVoyage.some((a) => a.id === 'agent-f'));
 
-  // L'agent saisit les frais de son module, pas ceux d'un autre.
-  const wrong = await call(
-    'PUT',
-    '/voyage-affectations/aff-1',
-    { ...affectation, version: 1, frais: { LS: 1000 } },
-    agentToken,
+  // Le T1 est une photo ; seuls les frais du module sont acceptés.
+  assert.equal(
+    (await call('PUT', '/voyage-affectations/aff-1', { ...affectation, version: 1, frais: { T1: 1000 } }, agentToken)).status,
+    400,
   );
-  assert.equal(wrong.status, 400);
+  const photo = Buffer.from('photo-du-t1').toString('base64');
   const saisie = await call(
     'PUT',
     '/voyage-affectations/aff-1',
-    { ...affectation, agentId: '', version: 1, frais: { T1: 25000, 'Frais de passage': 10000 } },
+    {
+      ...affectation,
+      agentId: '',
+      version: 1,
+      frais: { 'Frais de passage': 10000, 'TS Frontière': 25000 },
+      t1Image: photo,
+    },
     agentToken,
   );
   assert.equal(saisie.status, 200);
   assert.equal(saisie.body.total, 35000);
+  assert.equal(saisie.body.aT1, true);
   assert.equal(saisie.body.saisiPar, 'Agent Frontière');
-  // L'agent ne peut pas retirer l'agent affecté.
   assert.equal(saisie.body.agentId, 'agent-f');
-  const enquete = await call(
+  assert.equal((await call('GET', '/voyage-affectations/aff-1/t1', undefined, agentToken)).body.image, photo);
+
+  // Validée, la saisie ne se modifie plus.
+  const validated = await call(
     'PUT',
-    '/voyage-affectations/aff-3',
-    { ...affectation, module: 'Enquête' },
+    '/voyage-affectations/aff-1',
+    { ...affectation, version: 2, frais: { 'Frais de passage': 10000, 'TS Frontière': 25000 }, valider: true },
     agentToken,
   );
-  assert.equal(enquete.status, 403);
+  assert.equal(validated.status, 200);
+  assert.equal(validated.body.statut, 'Validé');
+  assert.equal(validated.body.aT1, true);
+  assert.equal(
+    (await call('PUT', '/voyage-affectations/aff-1', { ...affectation, version: 3, frais: {} }, agentToken)).status,
+    409,
+  );
+  assert.equal(
+    (await call('PUT', '/voyage-affectations/aff-3', { ...affectation, module: 'Enquête' }, agentToken)).status,
+    403,
+  );
   assert.equal((await call('DELETE', '/voyage-affectations/aff-1')).status, 409);
+
+  // L'agent facture ses saisies validées ; la Direction règle la facture.
+  const invoice = {
+    reference: 'FAC-FRT-1026-0001',
+    module: 'Frontière',
+    agentId: 'agent-f',
+    agentNom: 'Agent Frontière',
+    dateEmission: '20/10/2026',
+    affectations: ['aff-1'],
+    reglements: [],
+  };
+  const facture = await call('PUT', '/factures-agent/fa-1', invoice, agentToken);
+  assert.equal(facture.status, 200);
+  assert.equal(facture.body.montant, 35000);
+  assert.equal(
+    (await call('PUT', '/factures-agent/fa-2', { ...invoice, reference: 'FAC-FRT-1026-0002' }, agentToken)).status,
+    409,
+  );
+  const payment = { id: 'pay-1', date: '21/10/2026 10:00', montant: 35000, modePaiement: 'Espèces' };
+  assert.equal(
+    (await call('PUT', '/factures-agent/fa-1', { ...invoice, version: 1, reglements: [payment] }, agentToken)).status,
+    403,
+  );
+  const paid = await call('PUT', '/factures-agent/fa-1', { ...invoice, version: 1, reglements: [payment] });
+  assert.equal(paid.status, 200);
+  const after = await call('GET', '/donnees', undefined, agentToken);
+  const saved = after.body.facturesAgent.find((f) => f.id === 'fa-1');
+  assert.deepEqual(saved.affectations, ['aff-1']);
+  assert.equal(saved.reglements[0].montant, 35000);
+  assert.equal(after.body.affectationsVoyage[0].factureId, 'fa-1');
+  assert.equal((await call('DELETE', '/factures-agent/fa-1', undefined, agentToken)).status, 409);
 });

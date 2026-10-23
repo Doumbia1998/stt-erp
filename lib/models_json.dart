@@ -586,30 +586,39 @@ Map<String, dynamic> factureTransporteurToJson(FactureTransporteur f) => {
 AffectationVoyage affectationVoyageFromJson(Map<String, dynamic> json) =>
     AffectationVoyage(
       id: json['id'] as String,
-      voyageCle: json['voyageCle'] as String? ?? '',
-      module: json['module'] as String? ?? '',
-      agentId: json['agentId'] as String? ?? '',
-      dateDepart: json['dateDepart'] as String? ?? '',
-      plaque: json['plaque'] as String? ?? '',
-      transporteur: json['transporteur'] as String? ?? '',
-      chauffeur: json['chauffeur'] as String? ?? '',
-      telephone: json['telephone'] as String? ?? '',
-      dossiers: json['dossiers'] as String? ?? '',
-      clients: json['clients'] as String? ?? '',
-      transitaire: json['transitaire'] as String? ?? '',
-      conteneurs: json['conteneurs'] as String? ?? '',
+      voyageCle: _str(json['voyageCle']),
+      module: _str(json['module']),
+      agentId: _str(json['agentId']),
+      dateDepart: _str(json['dateDepart']),
+      plaque: _str(json['plaque']),
+      transporteur: _str(json['transporteur']),
+      chauffeur: _str(json['chauffeur']),
+      telephone: _str(json['telephone']),
+      dossiers: _str(json['dossiers']),
+      clients: _str(json['clients']),
+      transitaire: _str(json['transitaire']),
+      conteneurs: _str(json['conteneurs']),
       frais: {
         for (final e in ((json['frais'] as Map?) ?? const {}).entries)
           e.key as String: _num(e.value),
       },
-      observations: json['observations'] as String? ?? '',
-      assignePar: json['assignePar'] as String? ?? '',
-      saisiPar: json['saisiPar'] as String? ?? '',
-      saisiLe: json['saisiLe'] as String? ?? '',
+      observations: _str(json['observations']),
+      assignePar: _str(json['assignePar']),
+      saisiPar: _str(json['saisiPar']),
+      saisiLe: _str(json['saisiLe']),
+      statut: json['statut'] as String? ?? 'Brouillon',
+      validePar: _str(json['validePar']),
+      valideLe: _str(json['valideLe']),
+      creeLe: _str(json['creeLe']),
+      aT1: json['aT1'] as bool? ?? false,
+      factureId: _str(json['factureId']),
       version: (json['version'] as num?)?.toInt() ?? 0,
     );
 
-Map<String, dynamic> affectationVoyageToJson(AffectationVoyage a) => {
+Map<String, dynamic> affectationVoyageToJson(
+  AffectationVoyage a, {
+  bool valider = false,
+}) => {
   'voyageCle': a.voyageCle,
   'module': a.module,
   'agentId': a.agentId,
@@ -625,10 +634,88 @@ Map<String, dynamic> affectationVoyageToJson(AffectationVoyage a) => {
   'frais': a.frais,
   'observations': a.observations,
   'version': a.version,
+  if (a.t1Image != null) 't1Image': a.t1Image,
+  if (valider) 'valider': true,
 };
+
+// Reprend dans l'affectation locale ce que le serveur a enregistré.
+void applyAffectationVoyageJson(
+  AffectationVoyage a,
+  Map<String, dynamic> json,
+) {
+  final saved = affectationVoyageFromJson(json);
+  a
+    ..agentId = saved.agentId
+    ..frais = saved.frais
+    ..observations = saved.observations
+    ..assignePar = saved.assignePar
+    ..saisiPar = saved.saisiPar
+    ..saisiLe = saved.saisiLe
+    ..statut = saved.statut
+    ..validePar = saved.validePar
+    ..valideLe = saved.valideLe
+    ..creeLe = saved.creeLe
+    ..aT1 = saved.aT1
+    ..t1Image = null
+    ..factureId = saved.factureId
+    ..version = saved.version;
+}
 
 AgentVoyage agentVoyageFromJson(Map<String, dynamic> json) => AgentVoyage(
   id: json['id'] as String,
-  nom: json['nom'] as String? ?? '',
+  nom: _str(json['nom']),
   modules: {...((json['modules'] as List?) ?? const []).cast<String>()},
 );
+
+FactureAgent factureAgentFromJson(Map<String, dynamic> json) => FactureAgent(
+  id: json['id'] as String,
+  numero: (json['numero'] as num?)?.toInt() ?? 0,
+  reference: _str(json['reference']),
+  module: _str(json['module']),
+  agentId: _str(json['agentId']),
+  agentNom: _str(json['agentNom']),
+  dateEmission: _str(json['dateEmission']),
+  observations: _str(json['observations']),
+  montant: _num(json['montant']),
+  affectations: ((json['affectations'] as List?) ?? const []).cast<String>(),
+  reglements: [
+    for (final r in (json['reglements'] as List? ?? const []))
+      ReglementFacture(
+        id: r['id'] as String,
+        date: _str(r['date']),
+        montant: _num(r['montant']),
+        codeJournal: _str(r['codeJournal']),
+        modePaiement: _str(r['modePaiement']),
+        numeroCheque: _str(r['numeroCheque']),
+        observations: _str(r['observations']),
+        auteur: _str(r['auteur']),
+        saisiLe: _str(r['saisiLe']),
+      ),
+  ],
+  version: (json['version'] as num?)?.toInt() ?? 0,
+  auteur: _str(json['auteur']),
+  dateSaisie: _str(json['dateSaisie']),
+);
+
+Map<String, dynamic> factureAgentToJson(FactureAgent f) => {
+  'reference': f.reference,
+  'module': f.module,
+  'agentId': f.agentId,
+  'agentNom': f.agentNom,
+  'dateEmission': f.dateEmission,
+  'observations': f.observations,
+  'version': f.version,
+  'affectations': f.affectations,
+  'reglements': [
+    for (final r in f.reglements)
+      {
+        'id': r.id,
+        'date': r.date,
+        'montant': r.montant,
+        'codeJournal': r.codeJournal,
+        'modePaiement': r.modePaiement,
+        'numeroCheque': r.numeroCheque,
+        'observations': r.observations,
+      },
+  ],
+};

@@ -25,6 +25,7 @@ const {
   voyageAffectationsRouter,
   loadAffectations,
 } = require('./routes/voyageAffectations');
+const { facturesAgentRouter, loadFacturesAgent } = require('./routes/facturesAgent');
 
 function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
   const app = express();
@@ -107,7 +108,7 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
   api.get('/donnees', async (req, res, next) => {
     try {
       const [clients, prestataires, comptes, journaux, voyages, dossiers, users, modes, frais,
-        vehicules, facturesTransitaire, facturesTransporteur, affectations, agents] =
+        vehicules, facturesTransitaire, facturesTransporteur, affectations, agents, facturesAgent] =
         await Promise.all([
           pool.query('SELECT * FROM clients ORDER BY cree_le, id'),
           pool.query('SELECT * FROM prestataires ORDER BY cree_le, id'),
@@ -130,6 +131,7 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
              WHERE modules && ARRAY['Frontière', 'Bureau DD', 'Enquête']
              ORDER BY lower(nom)`,
           ),
+          loadFacturesAgent(pool),
         ]);
       const vehiculesBy = new Map();
       for (const v of vehicules.rows) {
@@ -151,6 +153,7 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
         facturesTransitaire,
         facturesTransporteur,
         affectationsVoyage: affectations,
+        facturesAgent,
         agentsVoyage: agents.rows.map((a) => ({ id: a.id, nom: a.nom, modules: a.modules })),
         dossiers,
       });
@@ -165,6 +168,7 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
   api.use(facturesTransitaireRouter(pool));
   api.use(facturesTransporteurRouter(pool));
   api.use(voyageAffectationsRouter(pool));
+  api.use(facturesAgentRouter(pool));
   app.use('/api/v1', api);
 
   app.use((_req, res) => {

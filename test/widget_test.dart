@@ -919,11 +919,18 @@ void main() {
     expect(affectation.dossiers, 'STT-d1, STT-d2');
     expect(inVoyages(find.text('Frontière')), findsOneWidget);
 
-    await tester.ensureVisible(find.byTooltip('Frontière'));
-    await tester.tap(find.byTooltip('Frontière'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Agent Frontière').last);
-    await tester.pumpAndSettle();
+    Future<void> openMenu(String module, String item) async {
+      await tester.ensureVisible(find.byTooltip(module));
+      await tester.tap(find.byTooltip(module));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(item).last);
+      await tester.pumpAndSettle();
+    }
+
+    // Tableau de bord de la Frontière : un voyage à saisir.
+    await openMenu('Frontière', 'Tableau de bord Frontière');
+    expect(find.textContaining('nouveau voyage à saisir'), findsWidgets);
+    await openMenu('Frontière', 'Agent Frontière');
     final border = find.byKey(const ValueKey('voyage-module-grid-Frontière'));
     expect(
       find.descendant(of: border, matching: find.text('À saisir')),
@@ -934,23 +941,93 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('voyage-fees-edit')));
     await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('voyage-fee-T1')),
-      '25000',
-    );
+    expect(find.byKey(const ValueKey('voyage-fee-Client')), findsNothing);
+    expect(find.byKey(const ValueKey('voyage-t1-pick')), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('voyage-fee-Frais de passage')),
       '10000',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('voyage-fee-TS Frontière')),
+      '25000',
     );
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('voyage-fees-save')));
     await tester.pumpAndSettle();
     expect(affectation.total, 35000);
-    expect(affectation.frais['T1'], 25000);
+    expect(affectation.estValide, isFalse);
+    // Onglet « Saisis » : on valide, la saisie passe dans « Validés ».
+    await tester.tap(find.byKey(const ValueKey('voyage-tab-saisis')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(of: border, matching: find.text('Issa')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('voyage-validate')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('voyage-validate-confirm')));
+    await tester.pumpAndSettle();
+    expect(affectation.estValide, isTrue);
+    await tester.tap(find.byKey(const ValueKey('voyage-tab-valides')));
+    await tester.pumpAndSettle();
     expect(
-      find.descendant(of: border, matching: find.text('Saisi')),
+      find.descendant(of: border, matching: find.text('Validé')),
       findsOneWidget,
     );
+    // Validée, la saisie ne se modifie plus.
+    await tester.tap(find.descendant(of: border, matching: find.text('Issa')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<ErpActionButton>(
+            find.byKey(const ValueKey('voyage-fees-edit')),
+          )
+          .onPressed,
+      isNull,
+    );
+    // Cocher les saisies validées puis créer la facture de l'agent.
+    await tester.tap(find.byKey(const ValueKey('voyage-check-all')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('voyage-create-invoice')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('agent-invoice-confirm')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Fermer'));
+    await tester.pumpAndSettle();
+    final agentInvoice = (erpBackend as MemoryErpBackend).facturesAgent.single;
+    expect(agentInvoice.montant, 35000);
+    expect(agentInvoice.reference, startsWith('FAC-FRT-'));
+    expect(affectation.factureId, agentInvoice.id);
+    expect(
+      find.descendant(of: border, matching: find.text('Facturé')),
+      findsOneWidget,
+    );
+
+    // La Direction règle la facture ; elle apparaît « Payée ».
+    await openMenu('Frontière', 'Factures Frontière');
+    final agentInvoices = find.byKey(
+      const ValueKey('agent-invoices-grid-Frontière'),
+    );
+    await tester.tap(
+      find.descendant(
+        of: agentInvoices,
+        matching: find.text(agentInvoice.reference),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('agent-payment-new')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('agent-payment-new')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('payment-save')));
+    await tester.pumpAndSettle();
+    expect(agentInvoice.estPayee, isTrue);
+    expect(
+      find.descendant(of: agentInvoices, matching: find.text('Payée')),
+      findsOneWidget,
+    );
+    await openMenu('Frontière', 'Tableau de bord Frontière');
+    expect(find.textContaining('payée le'), findsWidgets);
     await tester.ensureVisible(find.byTooltip('Transport'));
     await tester.tap(find.byTooltip('Transport'));
     await tester.pumpAndSettle();

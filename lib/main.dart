@@ -127,6 +127,7 @@ final List<FactureTransitaire> _facturesTransitaire = [];
 final List<FactureTransporteur> _facturesTransporteur = [];
 final List<AffectationVoyage> _affectationsVoyage = [];
 final List<AgentVoyage> _agentsVoyage = [];
+final List<FactureAgent> _facturesAgent = [];
 
 void _loadErpData(ErpData data) {
   _currentUser = data.user;
@@ -169,6 +170,9 @@ void _loadErpData(ErpData data) {
   _agentsVoyage
     ..clear()
     ..addAll(data.agentsVoyage);
+  _facturesAgent
+    ..clear()
+    ..addAll(data.facturesAgent);
 }
 
 class TransitTrackerApp extends StatelessWidget {
@@ -629,13 +633,19 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       ErpMenuItem('Historique', Icons.history_rounded),
     ]),
     ErpModule('Frontière', Icons.signpost_rounded, [
+      ErpMenuItem('Tableau de bord Frontière', Icons.space_dashboard_rounded),
       ErpMenuItem('Agent Frontière', Icons.signpost_rounded),
+      ErpMenuItem('Factures Frontière', Icons.receipt_long_rounded),
     ]),
     ErpModule('Bureau DD', Icons.local_police_rounded, [
+      ErpMenuItem('Tableau de bord DD', Icons.space_dashboard_rounded),
       ErpMenuItem('Bureau des Douanes (DD)', Icons.local_police_rounded),
+      ErpMenuItem('Factures DD', Icons.receipt_long_rounded),
     ]),
     ErpModule('Enquête', Icons.manage_search_rounded, [
+      ErpMenuItem('Tableau de bord Enquête', Icons.space_dashboard_rounded),
       ErpMenuItem('Enquêtes', Icons.manage_search_rounded),
+      ErpMenuItem('Factures Enquête', Icons.receipt_long_rounded),
     ]),
     ErpModule('Transitaire', Icons.directions_boat_rounded, [
       ErpMenuItem('Gestion des Transitaires & Chargeurs', Icons.groups_rounded),
@@ -894,18 +904,36 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           prestataires: _prestataires,
           comptes: _planAccounts,
         );
+      case 'Tableau de bord Frontière':
+        return VoyageModuleDashboard(module: 'Frontière');
+      case 'Tableau de bord DD':
+        return VoyageModuleDashboard(module: 'Bureau DD');
+      case 'Tableau de bord Enquête':
+        return VoyageModuleDashboard(module: 'Enquête');
+      case 'Factures Frontière':
+      case 'Factures DD':
+      case 'Factures Enquête':
+        return FacturesAgentPage(
+          module: switch (page.title) {
+            'Factures Frontière' => 'Frontière',
+            'Factures DD' => 'Bureau DD',
+            _ => 'Enquête',
+          },
+          journals: _journalCodes,
+          modes: _modesReglement,
+        );
       case 'Agent Frontière':
-        return const VoyageModulePage(
+        return VoyageModulePage(
           module: 'Frontière',
           title: 'Agent Frontière',
         );
       case 'Bureau des Douanes (DD)':
-        return const VoyageModulePage(
+        return VoyageModulePage(
           module: 'Bureau DD',
           title: 'Bureau des Douanes (DD)',
         );
       case 'Enquêtes':
-        return const VoyageModulePage(module: 'Enquête', title: 'Enquêtes');
+        return VoyageModulePage(module: 'Enquête', title: 'Enquêtes');
       case 'Voyages':
         return VoyagesPage(
           dossiers: _dossiers,
@@ -948,6 +976,11 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
     final openDossiers = _dossiers
         .where((dossier) => dossier.statut == 'Ouvert')
         .toList();
+    final voyageAlerts = [
+      for (final module in fraisParModuleVoyage.keys)
+        if (widget.authorizedModules.contains(module))
+          ..._voyageNotifications(module),
+    ];
     return Container(
       height: 64,
       color: const Color(0xFF18334F),
@@ -1079,37 +1112,59 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                   Icons.notifications_none_rounded,
                   color: Colors.white,
                 ),
-                if (openDossiers.isNotEmpty)
+                if (openDossiers.length + voyageAlerts.length > 0)
                   Positioned(
                     right: -5,
                     top: -5,
-                    child: _HeaderBadge(count: openDossiers.length),
+                    child: _HeaderBadge(
+                      count: openDossiers.length + voyageAlerts.length,
+                    ),
                   ),
               ],
             ),
-            itemBuilder: (context) => openDossiers.isEmpty
+            itemBuilder: (context) =>
+                openDossiers.isEmpty && voyageAlerts.isEmpty
                 ? const [
                     PopupMenuItem<String>(
                       enabled: false,
                       child: Text('Aucune notification pour le moment'),
                     ),
                   ]
-                : openDossiers
-                      .take(5)
-                      .map(
-                        (dossier) => PopupMenuItem<String>(
-                          enabled: false,
-                          child: SizedBox(
-                            width: 260,
-                            child: Text(
-                              'Dossier ${dossier.numDossier} à suivre • ${dossier.client.nom}',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                : [
+                    // Voyages Frontière / Bureau DD / Enquête : saisies et factures.
+                    for (final (text, icon, color) in voyageAlerts.take(8))
+                      PopupMenuItem<String>(
+                        enabled: false,
+                        child: SizedBox(
+                          width: 300,
+                          child: Row(
+                            children: [
+                              Icon(icon, size: 18, color: color),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  text,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      )
-                      .toList(),
+                      ),
+                    for (final dossier in openDossiers.take(5))
+                      PopupMenuItem<String>(
+                        enabled: false,
+                        child: SizedBox(
+                          width: 300,
+                          child: Text(
+                            'Dossier ${dossier.numDossier} à suivre • ${dossier.client.nom}',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                  ],
           ),
           PopupMenuButton<String>(
             tooltip: 'Profil utilisateur',
@@ -1569,6 +1624,9 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
     'Recouvreur',
     'Prestataire',
     'Transporteur',
+    'Agent Frontière',
+    'Agent Bureau DD',
+    'Agent Enquête',
   ];
 
   // Inclut un rôle enregistré qui ne serait plus dans la liste.
@@ -1606,6 +1664,12 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
         return {'Prestation'};
       case 'Transporteur':
         return {'Transport'};
+      case 'Agent Frontière':
+        return {'Frontière'};
+      case 'Agent Bureau DD':
+        return {'Bureau DD'};
+      case 'Agent Enquête':
+        return {'Enquête'};
       default:
         return {'Gestion', 'Transport'};
     }

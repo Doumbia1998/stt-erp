@@ -754,9 +754,19 @@ class FactureTransporteur {
 
 // Frais saisis par chaque module sur un voyage qui lui est affecté.
 const fraisParModuleVoyage = <String, List<String>>{
-  'Frontière': ['T1', 'Frais de passage', 'TS Frontière', 'Client'],
+  'Frontière': ['Frais de passage', 'TS Frontière'],
   'Bureau DD': ['Frais de circuit', 'DD conteneur ou camion', 'TS'],
   'Enquête': ['Amende', 'LS', 'TS spécial', 'TS ordinaire'],
+};
+
+// Modules qui joignent la photo du T1 à leur saisie.
+const modulesAvecT1 = {'Frontière'};
+
+// Préfixe des factures d'agents par module.
+const prefixeFactureAgent = <String, String>{
+  'Frontière': 'FAC-FRT',
+  'Bureau DD': 'FAC-BDD',
+  'Enquête': 'FAC-ENQ',
 };
 
 // Voyage confié à un module (Frontière, Bureau DD, Enquête) et frais de l'agent.
@@ -779,6 +789,16 @@ class AffectationVoyage {
   String assignePar;
   String saisiPar;
   String saisiLe;
+  // « Brouillon » puis « Validé » : une saisie validée ne se modifie plus.
+  String statut;
+  String validePar;
+  String valideLe;
+  String creeLe;
+  // Vrai quand la photo du T1 est enregistrée sur le serveur.
+  bool aT1;
+  // Photo du T1 à envoyer : null = inchangée, '' = retirée.
+  String? t1Image;
+  String factureId;
   int version;
 
   AffectationVoyage({
@@ -800,11 +820,20 @@ class AffectationVoyage {
     this.assignePar = '',
     this.saisiPar = '',
     this.saisiLe = '',
+    this.statut = 'Brouillon',
+    this.validePar = '',
+    this.valideLe = '',
+    this.creeLe = '',
+    this.aT1 = false,
+    this.t1Image,
+    this.factureId = '',
     this.version = 0,
   }) : frais = frais ?? {};
 
   double get total => frais.values.fold(0, (s, v) => s + v);
-  bool get estSaisi => total > 0;
+  bool get estValide => statut == 'Validé';
+  bool get estSaisi => total > 0 || aT1;
+  bool get estFacture => factureId.isNotEmpty;
 }
 
 // Utilisateur d'un module voyage, proposé comme agent à l'affectation.
@@ -818,4 +847,47 @@ class AgentVoyage {
     required this.nom,
     required this.modules,
   });
+}
+
+// Facture d'un agent (Frontière, Bureau DD, Enquête) : ses saisies validées,
+// réglée par la Direction.
+class FactureAgent {
+  final String id;
+  int numero;
+  String reference;
+  final String module;
+  String agentId;
+  String agentNom;
+  String dateEmission;
+  String observations;
+  double montant;
+  List<String> affectations;
+  final List<ReglementFacture> reglements;
+  int version;
+  String auteur;
+  String dateSaisie;
+
+  FactureAgent({
+    required this.id,
+    this.numero = 0,
+    required this.reference,
+    required this.module,
+    this.agentId = '',
+    this.agentNom = '',
+    required this.dateEmission,
+    this.observations = '',
+    this.montant = 0,
+    List<String>? affectations,
+    List<ReglementFacture>? reglements,
+    this.version = 0,
+    this.auteur = '',
+    this.dateSaisie = '',
+  }) : affectations = affectations ?? [],
+       reglements = reglements ?? [];
+
+  double get totalRegle => reglements.fold(0, (s, r) => s + r.montant);
+  double get reliquat => montant - totalRegle;
+  bool get estPayee => montant > 0 && reliquat <= 0.001;
+  String get dernierReglement =>
+      reglements.isEmpty ? '' : reglements.last.date.split(' ').first;
 }

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 
 import 'models.dart';
 import 'models_json.dart';
@@ -33,6 +34,7 @@ class ErpData {
   final List<FactureTransporteur> facturesTransporteur;
   final List<AffectationVoyage> affectationsVoyage;
   final List<AgentVoyage> agentsVoyage;
+  final List<FactureAgent> facturesAgent;
 
   const ErpData({
     required this.user,
@@ -49,6 +51,7 @@ class ErpData {
     this.facturesTransporteur = const [],
     this.affectationsVoyage = const [],
     this.agentsVoyage = const [],
+    this.facturesAgent = const [],
   });
 }
 
@@ -155,8 +158,14 @@ abstract class ErpBackend {
   Future<void> deleteFactureTransporteur(FactureTransporteur facture);
 
   // Voyages affectés aux modules Frontière, Bureau DD et Enquête.
-  Future<void> saveAffectationVoyage(AffectationVoyage affectation);
+  Future<void> saveAffectationVoyage(
+    AffectationVoyage affectation, {
+    bool valider = false,
+  });
   Future<void> deleteAffectationVoyage(AffectationVoyage affectation);
+  Future<String?> photoT1(AffectationVoyage affectation);
+  Future<void> saveFactureAgent(FactureAgent facture);
+  Future<void> deleteFactureAgent(FactureAgent facture);
 
   // Comptabilité générée depuis la gestion.
   Future<MiseAJourResultat> miseAJourComptable({
@@ -278,6 +287,10 @@ class HttpErpBackend implements ErpBackend {
       agentsVoyage: ((json['agentsVoyage'] as List?) ?? const [])
           .cast<Map<String, dynamic>>()
           .map(agentVoyageFromJson)
+          .toList(),
+      facturesAgent: ((json['facturesAgent'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(factureAgentFromJson)
           .toList(),
       dossiers: [
         for (final dossier in rows('dossiers'))
@@ -410,23 +423,50 @@ class HttpErpBackend implements ErpBackend {
       _send('DELETE', '/factures-transporteur/${_segment(facture.id)}');
 
   @override
-  Future<void> saveAffectationVoyage(AffectationVoyage affectation) async {
+  Future<void> saveAffectationVoyage(
+    AffectationVoyage affectation, {
+    bool valider = false,
+  }) async {
     final result = await _send(
       'PUT',
       '/voyage-affectations/${_segment(affectation.id)}',
-      affectationVoyageToJson(affectation),
+      affectationVoyageToJson(affectation, valider: valider),
     );
-    affectation
-      ..version = (result['version'] as num).toInt()
-      ..agentId = result['agentId'] as String? ?? affectation.agentId
-      ..assignePar = result['assignePar'] as String? ?? ''
-      ..saisiPar = result['saisiPar'] as String? ?? ''
-      ..saisiLe = result['saisiLe'] as String? ?? '';
+    applyAffectationVoyageJson(affectation, result as Map<String, dynamic>);
   }
 
   @override
   Future<void> deleteAffectationVoyage(AffectationVoyage affectation) =>
       _send('DELETE', '/voyage-affectations/${_segment(affectation.id)}');
+
+  @override
+  Future<String?> photoT1(AffectationVoyage affectation) async {
+    final result = await _send(
+      'GET',
+      '/voyage-affectations/${_segment(affectation.id)}/t1',
+    );
+    return (result as Map<String, dynamic>)['image'] as String?;
+  }
+
+  @override
+  Future<void> saveFactureAgent(FactureAgent facture) async {
+    final result = await _send(
+      'PUT',
+      '/factures-agent/${_segment(facture.id)}',
+      factureAgentToJson(facture),
+    );
+    facture
+      ..version = (result['version'] as num).toInt()
+      ..numero = (result['numero'] as num?)?.toInt() ?? facture.numero
+      ..montant = _numOf(result['montant'], facture.montant);
+  }
+
+  @override
+  Future<void> deleteFactureAgent(FactureAgent facture) =>
+      _send('DELETE', '/factures-agent/${_segment(facture.id)}');
+
+  static double _numOf(Object? value, double fallback) =>
+      (value as num?)?.toDouble() ?? fallback;
 
   @override
   Future<MiseAJourResultat> miseAJourComptable({
@@ -568,6 +608,8 @@ class MemoryErpBackend implements ErpBackend {
   final List<FactureTransporteur> facturesTransporteur = [];
   final List<AffectationVoyage> affectationsVoyage = [];
   final List<AgentVoyage> agentsVoyage = [];
+  final List<FactureAgent> facturesAgent = [];
+  final Map<String, String> photosT1 = {};
   final Map<String, String> _passwords = {};
 
   MemoryErpBackend({String adminPassword = '1234'})
@@ -638,6 +680,7 @@ class MemoryErpBackend implements ErpBackend {
       facturesTransporteur: [...facturesTransporteur],
       affectationsVoyage: [...affectationsVoyage],
       agentsVoyage: [...agentsVoyage],
+      facturesAgent: [...facturesAgent],
     );
   }
 
@@ -767,7 +810,10 @@ class MemoryErpBackend implements ErpBackend {
       facturesTransporteur.removeWhere((f) => f.id == facture.id);
 
   @override
-  Future<void> saveAffectationVoyage(AffectationVoyage affectation) async {
+  Future<void> saveAffectationVoyage(
+    AffectationVoyage affectation, {
+    bool valider = false,
+  }) async {
     if (affectationsVoyage.any(
       (a) =>
           a.id != affectation.id &&
@@ -779,17 +825,96 @@ class MemoryErpBackend implements ErpBackend {
         status: 409,
       );
     }
+    final stored = affectationsVoyage
+        .where((a) => a.id == affectation.id)
+        .firstOrNull;
+    if (stored != null && stored.estValide && !identical(stored, affectation)) {
+      throw const ErpBackendException(
+        'Cette saisie est validée : elle ne peut plus être modifiée.',
+        status: 409,
+      );
+    }
+    final image = affectation.t1Image;
+    if (image != null) {
+      if (image.isEmpty) {
+        photosT1.remove(affectation.id);
+      } else {
+        photosT1[affectation.id] = image;
+      }
+      affectation
+        ..aT1 = image.isNotEmpty
+        ..t1Image = null;
+    }
+    if (valider) {
+      if (!affectation.estSaisi) {
+        throw const ErpBackendException(
+          'Saisissez au moins un frais avant de valider.',
+          status: 400,
+        );
+      }
+      affectation
+        ..statut = 'Validé'
+        ..validePar = _user?.name ?? ''
+        ..valideLe = DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
+    }
     affectation.version += 1;
     if (affectation.assignePar.isEmpty) {
       affectation.assignePar = _user?.name ?? '';
     }
-    if (affectation.estSaisi) affectation.saisiPar = _user?.name ?? '';
+    if (affectation.creeLe.isEmpty) {
+      affectation.creeLe = DateFormat(
+        'dd/MM/yyyy HH:mm',
+      ).format(DateTime.now());
+    }
+    if (affectation.estSaisi && affectation.saisiPar.isEmpty) {
+      affectation.saisiPar = _user?.name ?? '';
+    }
     _upsert(affectationsVoyage, affectation, (a) => a.id == affectation.id);
   }
 
   @override
   Future<void> deleteAffectationVoyage(AffectationVoyage affectation) async =>
       affectationsVoyage.removeWhere((a) => a.id == affectation.id);
+
+  @override
+  Future<String?> photoT1(AffectationVoyage affectation) async =>
+      photosT1[affectation.id];
+
+  @override
+  Future<void> saveFactureAgent(FactureAgent facture) async {
+    final lines = affectationsVoyage
+        .where((a) => facture.affectations.contains(a.id))
+        .toList();
+    if (lines.any((a) => a.factureId.isNotEmpty && a.factureId != facture.id)) {
+      throw const ErpBackendException(
+        'Une des saisies est déjà facturée dans une autre facture.',
+        status: 409,
+      );
+    }
+    for (final a in affectationsVoyage.where(
+      (a) => a.factureId == facture.id,
+    )) {
+      a.factureId = '';
+    }
+    for (final a in lines) {
+      a.factureId = facture.id;
+    }
+    facture
+      ..montant = lines.fold(0, (s, a) => s + a.total)
+      ..version += 1;
+    if (facture.numero == 0) facture.numero = facturesAgent.length + 1;
+    _upsert(facturesAgent, facture, (f) => f.id == facture.id);
+  }
+
+  @override
+  Future<void> deleteFactureAgent(FactureAgent facture) async {
+    for (final a in affectationsVoyage.where(
+      (a) => a.factureId == facture.id,
+    )) {
+      a.factureId = '';
+    }
+    facturesAgent.removeWhere((f) => f.id == facture.id);
+  }
 
   // La version en mémoire n'a pas de comptabilité : rien à déverser.
   @override
