@@ -30,6 +30,7 @@ part 'pages/transporteurs_page.dart';
 part 'pages/voyage_modules_page.dart';
 part 'pages/voyages_page.dart';
 part 'widgets/erp_documents.dart';
+part 'widgets/dossier_report.dart';
 part 'widgets/erp_grid.dart';
 part 'widgets/tiers_accounts.dart';
 part 'widgets/user_photo.dart';
@@ -923,10 +924,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           modes: _modesReglement,
         );
       case 'Agent Frontière':
-        return VoyageModulePage(
-          module: 'Frontière',
-          title: 'Agent Frontière',
-        );
+        return VoyageModulePage(module: 'Frontière', title: 'Agent Frontière');
       case 'Bureau des Douanes (DD)':
         return VoyageModulePage(
           module: 'Bureau DD',
@@ -976,6 +974,12 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
     final openDossiers = _dossiers
         .where((dossier) => dossier.statut == 'Ouvert')
         .toList();
+    // Un agent Frontière / Bureau DD / Enquête ne voit que ce qui le concerne.
+    final agentOnly = _isVoyageAgentOnly;
+    final agentVoyages = agentOnly
+        ? _agentOpenVoyages()
+        : const <AffectationVoyage>[];
+    final dossierAlerts = agentOnly ? const <TransitDossier>[] : openDossiers;
     final voyageAlerts = [
       for (final module in fraisParModuleVoyage.keys)
         if (widget.authorizedModules.contains(module))
@@ -1089,16 +1093,22 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           if (isCompact) const Spacer(),
           IconButton(
             tooltip: 'Alertes conteneurs',
-            onPressed: () => _showContainerAlerts(openDossiers),
+            onPressed: () => agentOnly
+                ? _showAgentVoyages(context)
+                : _showContainerAlerts(openDossiers),
             icon: Stack(
               clipBehavior: Clip.none,
               children: [
                 const Icon(Icons.public_rounded, color: Colors.white),
-                if (openDossiers.isNotEmpty)
+                if ((agentOnly ? agentVoyages.length : openDossiers.length) > 0)
                   Positioned(
                     right: -6,
                     top: -5,
-                    child: _HeaderBadge(count: openDossiers.length),
+                    child: _HeaderBadge(
+                      count: agentOnly
+                          ? agentVoyages.length
+                          : openDossiers.length,
+                    ),
                   ),
               ],
             ),
@@ -1112,18 +1122,18 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                   Icons.notifications_none_rounded,
                   color: Colors.white,
                 ),
-                if (openDossiers.length + voyageAlerts.length > 0)
+                if (dossierAlerts.length + voyageAlerts.length > 0)
                   Positioned(
                     right: -5,
                     top: -5,
                     child: _HeaderBadge(
-                      count: openDossiers.length + voyageAlerts.length,
+                      count: dossierAlerts.length + voyageAlerts.length,
                     ),
                   ),
               ],
             ),
             itemBuilder: (context) =>
-                openDossiers.isEmpty && voyageAlerts.isEmpty
+                dossierAlerts.isEmpty && voyageAlerts.isEmpty
                 ? const [
                     PopupMenuItem<String>(
                       enabled: false,
@@ -1152,7 +1162,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                           ),
                         ),
                       ),
-                    for (final dossier in openDossiers.take(5))
+                    for (final dossier in dossierAlerts.take(5))
                       PopupMenuItem<String>(
                         enabled: false,
                         child: SizedBox(

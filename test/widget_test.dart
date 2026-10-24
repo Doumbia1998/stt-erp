@@ -906,6 +906,8 @@ void main() {
     await tester.tap(inVoyages(find.text('BF 5295 MD')));
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pumpAndSettle();
+    // ignore: avoid_print
+    print("STEP assign");
     await tester.tap(find.byKey(const ValueKey('voyage-assign')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('voyage-assign-Frontière')));
@@ -929,8 +931,12 @@ void main() {
     }
 
     // Tableau de bord de la Frontière : un voyage à saisir.
+    // ignore: avoid_print
+    print("STEP 1 await openMenu('Frontière', 'Tableau de bord Frontière');");
     await openMenu('Frontière', 'Tableau de bord Frontière');
     expect(find.textContaining('nouveau voyage à saisir'), findsWidgets);
+    // ignore: avoid_print
+    print("STEP 2 await openMenu('Frontière', 'Agent Frontière');");
     await openMenu('Frontière', 'Agent Frontière');
     final border = find.byKey(const ValueKey('voyage-module-grid-Frontière'));
     expect(
@@ -1005,6 +1011,8 @@ void main() {
     );
 
     // La Direction règle la facture ; elle apparaît « Payée ».
+    // ignore: avoid_print
+    print("STEP 3 await openMenu('Frontière', 'Factures Frontière');");
     await openMenu('Frontière', 'Factures Frontière');
     final agentInvoices = find.byKey(
       const ValueKey('agent-invoices-grid-Frontière'),
@@ -1027,6 +1035,8 @@ void main() {
       find.descendant(of: agentInvoices, matching: find.text('Payée')),
       findsOneWidget,
     );
+    // ignore: avoid_print
+    print("STEP 4 await openMenu('Frontière', 'Tableau de bord Frontière');");
     await openMenu('Frontière', 'Tableau de bord Frontière');
     expect(find.textContaining('payée le'), findsWidgets);
     await tester.ensureVisible(find.byTooltip('Transport'));

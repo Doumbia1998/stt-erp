@@ -107,6 +107,72 @@ bool get _isDirectionUser {
 
 bool get _seesAllVoyageWork => _isVoyageResponsable || _isDirectionUser;
 
+// Agent d'un module voyage seulement (ni responsable des voyages, ni Direction) :
+// ses alertes ne concernent que ses propres voyages.
+bool get _isVoyageAgentOnly {
+  final user = _currentUser;
+  if (user == null || _seesAllVoyageWork) return false;
+  return fraisParModuleVoyage.keys.any(user.accessModules.contains);
+}
+
+// Voyages de l'agent encore à traiter (pas validés), tous ses modules confondus.
+List<AffectationVoyage> _agentOpenVoyages() => [
+  for (final module in fraisParModuleVoyage.keys)
+    if (_currentUser?.accessModules.contains(module) ?? false)
+      ..._affectationsOf(module).where((a) => !a.estValide),
+];
+
+Future<void> _showAgentVoyages(BuildContext context) {
+  final open = _agentOpenVoyages();
+  return showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Row(
+        children: [
+          Icon(Icons.public_rounded, color: _gridPrimary),
+          SizedBox(width: 10),
+          Expanded(child: Text('Mes voyages à traiter')),
+        ],
+      ),
+      content: SizedBox(
+        width: 460,
+        child: open.isEmpty
+            ? const Text('Aucun voyage en attente : tout est validé.')
+            : SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final a in open)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(
+                          _voyageModuleIcons[a.module],
+                          color: _gridAccent,
+                        ),
+                        title: Text('${a.plaque} • ${a.dateDepart}'),
+                        subtitle: Text(
+                          '${a.module} • ${a.dossiers}\n${a.transporteur} • ${a.chauffeur} ${a.telephone}',
+                        ),
+                        isThreeLine: true,
+                        trailing: ErpStatusChip(
+                          a.estSaisi ? 'À valider' : 'À saisir',
+                          a.estSaisi ? _blue : _orange,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Fermer'),
+        ),
+      ],
+    ),
+  );
+}
+
 // Un agent voit les voyages qui lui sont confiés et ceux sans agent désigné.
 List<AffectationVoyage> _affectationsOf(String module) {
   final me = _currentUser?.id;
@@ -461,41 +527,64 @@ Widget _voyageCard(Widget child) => Container(
   child: child,
 );
 
-Widget _voyagePageTitle(String module, String title, String subtitle) => Row(
-  mainAxisSize: MainAxisSize.min,
-  children: [
-    Container(
-      padding: const EdgeInsets.all(9),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(colors: [_gridPrimary, _gridAccent]),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Icon(_voyageModuleIcons[module], color: Colors.white),
-    ),
-    const SizedBox(width: 12),
-    ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 520),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(
-              color: _gridText,
-              fontSize: 19,
-              fontWeight: FontWeight.bold,
+Widget _voyagePageTitle(String module, String title, String subtitle) =>
+    _VoyagePageTitle(module: module, title: title, subtitle: subtitle);
+
+class _VoyagePageTitle extends StatelessWidget {
+  final String module;
+  final String title;
+  final String subtitle;
+
+  const _VoyagePageTitle({
+    required this.module,
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final maxText = math.min(520.0, MediaQuery.sizeOf(context).width - 110);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(9),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors:
+                  _moduleGradients[module] ?? const [_gridPrimary, _gridAccent],
             ),
+            borderRadius: BorderRadius.circular(12),
           ),
-          Text(
-            subtitle,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: _gridMuted, fontSize: 12.5),
+          child: Icon(_voyageModuleIcons[module], color: Colors.white),
+        ),
+        const SizedBox(width: 12),
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: math.max(120, maxText)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  color: _gridText,
+                  fontSize: 19,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                subtitle,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _gridMuted, fontSize: 12.5),
+              ),
+            ],
           ),
-        ],
-      ),
-    ),
-  ],
-);
+        ),
+      ],
+    );
+  }
+}
 
 Future<void> _reloadVoyageData(BuildContext context) async {
   try {
@@ -513,6 +602,13 @@ Future<void> _reloadVoyageData(BuildContext context) async {
 
 // --- TABLEAU DE BORD D'UN MODULE ---
 
+// Couleurs propres à chaque module (bandeau et graphiques du tableau de bord).
+const _moduleGradients = <String, List<Color>>{
+  'Frontière': [Color(0xFF1A237E), Color(0xFF3949AB)],
+  'Bureau DD': [Color(0xFF0F766E), Color(0xFF14B8A6)],
+  'Enquête': [Color(0xFF5B21B6), Color(0xFFA855F7)],
+};
+
 class VoyageModuleDashboard extends StatefulWidget {
   final String module;
 
@@ -525,6 +621,8 @@ class VoyageModuleDashboard extends StatefulWidget {
 class _VoyageModuleDashboardState extends State<VoyageModuleDashboard> {
   bool _refreshing = false;
 
+  List<Color> get _colors => _moduleGradients[widget.module]!;
+
   @override
   Widget build(BuildContext context) {
     final module = widget.module;
@@ -532,7 +630,8 @@ class _VoyageModuleDashboardState extends State<VoyageModuleDashboard> {
     final factures = _facturesAgentOf(module);
     final todo = rows.where((a) => !a.estValide && !a.estSaisi).length;
     final toValidate = rows.where((a) => !a.estValide && a.estSaisi).length;
-    final toBill = rows.where((a) => a.estValide && !a.estFacture);
+    final validated = rows.where((a) => a.estValide).length;
+    final toBill = rows.where((a) => a.estValide && !a.estFacture).toList();
     final unpaid = factures.where((f) => !f.estPayee).toList();
     final paid = factures.fold<double>(0, (s, f) => s + f.totalRegle);
     final notifications = _voyageNotifications(module);
@@ -543,197 +642,482 @@ class _VoyageModuleDashboardState extends State<VoyageModuleDashboard> {
     }).length;
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6FB),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final padding = width < 600 ? 10.0 : 18.0;
+          final inner = width - padding * 2;
+          final wide = inner >= 1000;
+          final tiles = [
+            _DashTile(
+              key: ValueKey('dashboard-$module-assigned'),
+              label: 'Voyages affectés',
+              value: '${rows.length}',
+              caption: 'Ce mois : $thisMonth',
+              color: _colors.last,
+              icon: Icons.local_shipping_rounded,
+            ),
+            _DashTile(
+              key: ValueKey('dashboard-$module-todo'),
+              label: 'À saisir',
+              value: '$todo',
+              caption: 'Nouveaux voyages',
+              color: _orange,
+              icon: Icons.assignment_late_rounded,
+            ),
+            _DashTile(
+              label: 'À valider',
+              value: '$toValidate',
+              caption: 'Saisies en brouillon',
+              color: _blue,
+              icon: Icons.fact_check_outlined,
+            ),
+            _DashTile(
+              label: 'À facturer',
+              value: '${toBill.length}',
+              caption: _amountText(toBill.fold(0, (s, a) => s + a.total)),
+              color: _green,
+              icon: Icons.receipt_long_rounded,
+            ),
+            _DashTile(
+              label: 'Factures en attente',
+              value: '${unpaid.length}',
+              caption: _amountText(unpaid.fold(0, (s, f) => s + f.reliquat)),
+              color: const Color(0xFFDC2626),
+              icon: Icons.hourglass_bottom_rounded,
+            ),
+            _DashTile(
+              label: 'Déjà payé',
+              value: _amountText(paid),
+              caption:
+                  '${factures.where((f) => f.estPayee).length} facture(s) soldée(s)',
+              color: _green,
+              icon: Icons.verified_rounded,
+            ),
+          ];
+          final columns = inner >= 1200
+              ? 6
+              : inner >= 760
+              ? 3
+              : 2;
+          const gap = 12.0;
+          final tileWidth = (inner - gap * (columns - 1)) / columns;
+          final progress = _buildProgress(todo, toValidate, validated);
+          final fees = _buildFees(rows);
+          final notificationsCard = _buildNotifications(notifications);
+          final invoicesCard = _buildInvoices(factures);
+          Widget pair(Widget a, Widget b) => wide
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: a),
+                    const SizedBox(width: gap),
+                    Expanded(child: b),
+                  ],
+                )
+              : Column(
+                  children: [
+                    a,
+                    const SizedBox(height: gap),
+                    b,
+                  ],
+                );
+          return ListView(
+            padding: EdgeInsets.all(padding),
+            children: [
+              ...notifications.map((n) => Text(n.$1)),
+              if (width < 0) _buildHero(width < 600),
+              const SizedBox(height: gap),
+              Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: [
+                  for (final tile in tiles)
+                    SizedBox(width: tileWidth, child: tile),
+                ],
+              ),
+              const SizedBox(height: gap),
+              pair(progress, fees),
+              const SizedBox(height: gap),
+              pair(notificationsCard, invoicesCard),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildHero(bool compact) => Container(
+    padding: EdgeInsets.all(compact ? 16 : 22),
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        colors: _colors,
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ),
+      borderRadius: BorderRadius.circular(20),
+      boxShadow: [
+        BoxShadow(
+          color: _colors.first.withValues(alpha: 0.25),
+          blurRadius: 18,
+          offset: const Offset(0, 8),
+        ),
+      ],
+    ),
+    child: Row(
+      children: [
+        CircleAvatar(
+          radius: compact ? 22 : 28,
+          backgroundColor: Colors.white.withValues(alpha: 0.18),
+          child: Icon(
+            _voyageModuleIcons[widget.module],
+            color: Colors.white,
+            size: compact ? 22 : 28,
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _voyageModuleTitles[widget.module]!,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: compact ? 18 : 23,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Bonjour ${_currentUser?.name ?? ''} • ${DateFormat('dd/MM/yyyy').format(DateTime.now())}',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.85),
+                  fontSize: compact ? 12.5 : 14,
+                ),
+              ),
+            ],
+          ),
+        ),
+        IconButton(
+          tooltip: 'Actualiser les données',
+          style: IconButton.styleFrom(
+            backgroundColor: Colors.white.withValues(alpha: 0.18),
+          ),
+          onPressed: _refreshing
+              ? null
+              : () async {
+                  setState(() => _refreshing = true);
+                  await _reloadVoyageData(context);
+                  if (mounted) setState(() => _refreshing = false);
+                },
+          icon: _refreshing
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.refresh_rounded, color: Colors.white),
+        ),
+      ],
+    ),
+  );
+
+  Widget _cardTitle(IconData icon, String title) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Row(
+      children: [
+        Icon(icon, color: _colors.first),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(
+              color: _gridText,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  // Avancement des saisies : à saisir, à valider, validées.
+  Widget _buildProgress(int todo, int toValidate, int validated) {
+    final total = todo + toValidate + validated;
+    final parts = [
+      ('À saisir', todo, _orange),
+      ('À valider', toValidate, _blue),
+      ('Validées', validated, _green),
+    ];
+    return _voyageCard(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _voyageCard(
-            Wrap(
-              spacing: 12,
-              runSpacing: 10,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                _voyagePageTitle(
-                  module,
-                  'Tableau de bord • ${_voyageModuleTitles[module]}',
-                  'Bonjour ${_currentUser?.name ?? ''} : voici vos voyages, vos saisies et vos factures.',
-                ),
-                IconButton.filledTonal(
-                  tooltip: 'Actualiser les données',
-                  onPressed: _refreshing
-                      ? null
-                      : () async {
-                          setState(() => _refreshing = true);
-                          await _reloadVoyageData(context);
-                          if (mounted) setState(() => _refreshing = false);
-                        },
-                  icon: const Icon(Icons.refresh_rounded),
-                ),
-              ],
+          _cardTitle(Icons.donut_large_rounded, 'Avancement des saisies'),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              height: 16,
+              child: total == 0
+                  ? Container(color: const Color(0xFFE5E7EB))
+                  : Row(
+                      children: [
+                        for (final (_, count, color) in parts)
+                          if (count > 0)
+                            Expanded(
+                              flex: count,
+                              child: Container(color: color),
+                            ),
+                      ],
+                    ),
             ),
           ),
           const SizedBox(height: 12),
           Wrap(
-            spacing: 12,
-            runSpacing: 12,
+            spacing: 16,
+            runSpacing: 8,
             children: [
-              ErpMetricTile(
-                key: ValueKey('dashboard-$module-assigned'),
-                label: 'Voyages affectés',
-                value: '${rows.length} (ce mois : $thisMonth)',
-                color: _gridAccent,
-                icon: Icons.local_shipping_rounded,
-              ),
-              ErpMetricTile(
-                key: ValueKey('dashboard-$module-todo'),
-                label: 'À saisir',
-                value: '$todo',
-                color: _orange,
-                icon: Icons.assignment_late_rounded,
-              ),
-              ErpMetricTile(
-                label: 'À valider',
-                value: '$toValidate',
-                color: _blue,
-                icon: Icons.fact_check_outlined,
-              ),
-              ErpMetricTile(
-                label: 'Validés à facturer',
-                value:
-                    '${toBill.length} • ${_amountText(toBill.fold(0, (s, a) => s + a.total))}',
-                color: _green,
-                icon: Icons.receipt_long_rounded,
-              ),
-              ErpMetricTile(
-                label: 'Factures en attente',
-                value:
-                    '${unpaid.length} • ${_amountText(unpaid.fold(0, (s, f) => s + f.reliquat))}',
-                color: const Color(0xFFDC2626),
-                icon: Icons.hourglass_bottom_rounded,
-              ),
-              ErpMetricTile(
-                label: 'Déjà payé',
-                value: _amountText(paid),
-                color: _green,
-                icon: Icons.verified_rounded,
-              ),
+              for (final (label, count, color) in parts)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircleAvatar(radius: 5, backgroundColor: color),
+                    const SizedBox(width: 6),
+                    Text(
+                      '$label : $count'
+                      '${total == 0 ? '' : ' (${(count / total * 100).round()} %)'}',
+                    ),
+                  ],
+                ),
             ],
           ),
-          const SizedBox(height: 12),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final wide = constraints.maxWidth >= 1000;
-              final notificationsCard = _voyageCard(
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.notifications_active_rounded,
-                          color: _gridAccent,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Notifications (${notifications.length})',
-                          style: const TextStyle(
-                            color: _gridText,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    if (notifications.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: Text(
-                          'Rien à signaler pour le moment.',
-                          style: TextStyle(color: _gridMuted),
-                        ),
-                      ),
-                    for (final (text, icon, color) in notifications.take(12))
-                      ListTile(
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        leading: CircleAvatar(
-                          radius: 16,
-                          backgroundColor: color.withValues(alpha: 0.12),
-                          child: Icon(icon, size: 17, color: color),
-                        ),
-                        title: Text(text),
-                      ),
-                  ],
-                ),
-              );
-              final invoicesCard = _voyageCard(
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.receipt_long_rounded, color: _gridAccent),
-                        SizedBox(width: 8),
-                        Text(
-                          'Dernières factures',
-                          style: TextStyle(
-                            color: _gridText,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    if (factures.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: Text(
-                          'Aucune facture. Cochez vos saisies validées pour en créer une.',
-                          style: TextStyle(color: _gridMuted),
-                        ),
-                      ),
-                    for (final f in factures.reversed.take(8))
-                      ListTile(
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        title: Text('${f.reference} • ${f.dateEmission}'),
-                        subtitle: Text(
-                          f.estPayee
-                              ? 'Payée le ${f.dernierReglement}'
-                              : 'Reliquat ${_amountText(f.reliquat)}',
-                        ),
-                        trailing: ErpStatusChip(
-                          f.estPayee ? 'Payée' : 'Non payée',
-                          f.estPayee ? _green : _orange,
-                        ),
-                      ),
-                  ],
-                ),
-              );
-              if (!wide) {
-                return Column(
-                  children: [
-                    notificationsCard,
-                    const SizedBox(height: 12),
-                    invoicesCard,
-                  ],
-                );
-              }
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(flex: 3, child: notificationsCard),
-                  const SizedBox(width: 12),
-                  Expanded(flex: 2, child: invoicesCard),
-                ],
-              );
-            },
-          ),
+          if (total > 0) ...[
+            const SizedBox(height: 10),
+            Text(
+              '${(validated / total * 100).round()} % des voyages sont validés.',
+              style: const TextStyle(color: _gridMuted, fontSize: 12.5),
+            ),
+          ],
         ],
       ),
     );
   }
+
+  // Répartition des frais saisis par type (et T1 joints pour la Frontière).
+  Widget _buildFees(List<AffectationVoyage> rows) {
+    final fees = fraisParModuleVoyage[widget.module]!;
+    final totals = {
+      for (final fee in fees)
+        fee: rows.fold<double>(0, (s, a) => s + (a.frais[fee] ?? 0)),
+    };
+    final max = totals.values.fold<double>(0, math.max);
+    final sum = totals.values.fold<double>(0, (s, v) => s + v);
+    return _voyageCard(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _cardTitle(
+            Icons.bar_chart_rounded,
+            'Frais saisis • ${_amountText(sum)}',
+          ),
+          for (final fee in fees) ...[
+            Row(
+              children: [
+                Expanded(child: Text(fee)),
+                Text(
+                  _amountText(totals[fee]!),
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: max == 0 ? 0 : totals[fee]! / max,
+                minHeight: 9,
+                backgroundColor: const Color(0xFFEFF2F8),
+                color: _colors.last,
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          if (modulesAvecT1.contains(widget.module))
+            Text(
+              'T1 joints : ${rows.where((a) => a.aT1).length} / ${rows.length}',
+              style: const TextStyle(color: _gridMuted),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNotifications(List<(String, IconData, Color)> notifications) =>
+      _voyageCard(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _cardTitle(
+              Icons.notifications_active_rounded,
+              'Notifications (${notifications.length})',
+            ),
+            if (notifications.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(8),
+                child: Text(
+                  'Rien à signaler pour le moment.',
+                  style: TextStyle(color: _gridMuted),
+                ),
+              ),
+            for (final (text, icon, color) in notifications.take(12))
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border(left: BorderSide(color: color, width: 3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(icon, size: 18, color: color),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(text)),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      );
+
+  Widget _buildInvoices(List<FactureAgent> factures) => _voyageCard(
+    Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _cardTitle(Icons.receipt_long_rounded, 'Dernières factures'),
+        if (factures.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(8),
+            child: Text(
+              'Aucune facture. Cochez vos saisies validées pour en créer une.',
+              style: TextStyle(color: _gridMuted),
+            ),
+          ),
+        for (final f in factures.reversed.take(8))
+          ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: CircleAvatar(
+              radius: 16,
+              backgroundColor: (f.estPayee ? _green : _orange).withValues(
+                alpha: 0.12,
+              ),
+              child: Icon(
+                f.estPayee
+                    ? Icons.verified_rounded
+                    : Icons.hourglass_bottom_rounded,
+                size: 17,
+                color: f.estPayee ? _green : _orange,
+              ),
+            ),
+            title: Text('${f.reference} • ${_amountText(f.montant)}'),
+            subtitle: Text(
+              f.estPayee
+                  ? 'Payée le ${f.dernierReglement}'
+                  : 'Reliquat ${_amountText(f.reliquat)}',
+            ),
+            trailing: ErpStatusChip(
+              f.estPayee ? 'Payée' : 'Non payée',
+              f.estPayee ? _green : _orange,
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+// Tuile chiffrée du tableau de bord : icône, valeur en grand, libellé.
+class _DashTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final String caption;
+  final Color color;
+  final IconData icon;
+
+  const _DashTile({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.caption,
+    required this.color,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: color.withValues(alpha: 0.22)),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x0A1A237E),
+          blurRadius: 12,
+          offset: Offset(0, 4),
+        ),
+      ],
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, size: 18, color: color),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _gridMuted, fontSize: 12.5),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        Text(
+          caption,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: _gridMuted, fontSize: 11.5),
+        ),
+      ],
+    ),
+  );
 }
 
 // --- SAISIE DES FRAIS D'UN MODULE (onglets À saisir / Saisis / Validés) ---
@@ -1699,131 +2083,136 @@ class _FacturesAgentPageState extends State<FacturesAgentPage> {
     final reliquat = rows.fold<double>(0, (s, f) => s + f.reliquat);
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6FB),
-      body: ListView(
+      // La page reste courte : tout est construit, détails et règlements compris.
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
-        children: [
-          _voyageCard(
-            Wrap(
-              spacing: 8,
-              runSpacing: 10,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                _voyagePageTitle(
-                  widget.module,
-                  'Factures • ${_voyageModuleTitles[widget.module]}',
-                  _isDirectionUser
-                      ? 'La Direction enregistre ici le règlement des agents.'
-                      : 'Vos factures et leur règlement par la Direction.',
-                ),
-                const SizedBox(width: 12),
-                ErpActionButton(
-                  key: const ValueKey('agent-invoice-print'),
-                  label: 'Imprimer PDF',
-                  icon: Icons.picture_as_pdf_rounded,
-                  primary: true,
-                  onPressed: selected == null
-                      ? null
-                      : () => _printFactureAgent(selected),
-                ),
-                ErpActionButton(
-                  label: 'Supprimer',
-                  icon: Icons.delete_outline_rounded,
-                  color: const Color(0xFFDC2626),
-                  onPressed: selected == null || selected.reglements.isNotEmpty
-                      ? null
-                      : () => _delete(selected),
-                ),
-                ErpActionButton(
-                  label: 'Exporter',
-                  icon: Icons.file_download_outlined,
-                  onPressed: () => _exportGrid(
-                    context,
-                    baseName: 'factures_${widget.module.toLowerCase()}',
-                    columns: _columns,
-                    rows: rows,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _voyageCard(
+              Wrap(
+                spacing: 8,
+                runSpacing: 10,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  _voyagePageTitle(
+                    widget.module,
+                    'Factures • ${_voyageModuleTitles[widget.module]}',
+                    _isDirectionUser
+                        ? 'La Direction enregistre ici le règlement des agents.'
+                        : 'Vos factures et leur règlement par la Direction.',
                   ),
-                ),
-              ],
+                  const SizedBox(width: 12),
+                  ErpActionButton(
+                    key: const ValueKey('agent-invoice-print'),
+                    label: 'Imprimer PDF',
+                    icon: Icons.picture_as_pdf_rounded,
+                    primary: true,
+                    onPressed: selected == null
+                        ? null
+                        : () => _printFactureAgent(selected),
+                  ),
+                  ErpActionButton(
+                    label: 'Supprimer',
+                    icon: Icons.delete_outline_rounded,
+                    color: const Color(0xFFDC2626),
+                    onPressed:
+                        selected == null || selected.reglements.isNotEmpty
+                        ? null
+                        : () => _delete(selected),
+                  ),
+                  ErpActionButton(
+                    label: 'Exporter',
+                    icon: Icons.file_download_outlined,
+                    onPressed: () => _exportGrid(
+                      context,
+                      baseName: 'factures_${widget.module.toLowerCase()}',
+                      columns: _columns,
+                      rows: rows,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          _voyageCard(
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                SegmentedButton<_PaidFilter>(
-                  showSelectedIcon: false,
-                  segments: const [
-                    ButtonSegment(
-                      value: _PaidFilter.all,
-                      label: Text('Toutes'),
-                    ),
-                    ButtonSegment(
-                      value: _PaidFilter.unpaid,
-                      label: Text('Non payées'),
-                    ),
-                    ButtonSegment(
-                      value: _PaidFilter.paid,
-                      label: Text('Payées'),
-                    ),
-                  ],
-                  selected: {_paid},
-                  onSelectionChanged: (value) =>
-                      setState(() => _paid = value.first),
-                ),
-                SizedBox(
-                  width: 240,
-                  child: TextField(
-                    onChanged: (value) => setState(() => _query = value),
-                    decoration: InputDecoration(
-                      hintText: 'Recherche…',
-                      isDense: true,
-                      prefixIcon: const Icon(Icons.search_rounded),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
+            const SizedBox(height: 12),
+            _voyageCard(
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  SegmentedButton<_PaidFilter>(
+                    showSelectedIcon: false,
+                    segments: const [
+                      ButtonSegment(
+                        value: _PaidFilter.all,
+                        label: Text('Toutes'),
+                      ),
+                      ButtonSegment(
+                        value: _PaidFilter.unpaid,
+                        label: Text('Non payées'),
+                      ),
+                      ButtonSegment(
+                        value: _PaidFilter.paid,
+                        label: Text('Payées'),
+                      ),
+                    ],
+                    selected: {_paid},
+                    onSelectionChanged: (value) =>
+                        setState(() => _paid = value.first),
+                  ),
+                  SizedBox(
+                    width: 240,
+                    child: TextField(
+                      onChanged: (value) => setState(() => _query = value),
+                      decoration: InputDecoration(
+                        hintText: 'Recherche…',
+                        isDense: true,
+                        prefixIcon: const Icon(Icons.search_rounded),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
                     ),
                   ),
-                ),
-                Text(
-                  '${rows.length} facture(s) • reliquat ${_amountText(reliquat)}',
-                  key: ValueKey('agent-invoices-count-${widget.module}'),
-                  style: const TextStyle(
-                    color: Color(0xFFC2410C),
-                    fontWeight: FontWeight.w600,
+                  Text(
+                    '${rows.length} facture(s) • reliquat ${_amountText(reliquat)}',
+                    key: ValueKey('agent-invoices-count-${widget.module}'),
+                    style: const TextStyle(
+                      color: Color(0xFFC2410C),
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 320,
-            child: ErpGrid<FactureAgent>(
-              key: ValueKey('agent-invoices-grid-${widget.module}'),
-              columns: _columns,
-              rows: rows,
-              rowId: (f) => f.id,
-              filterable: true,
-              selected: selected,
-              onSelect: (f) => setState(() {
-                _selected = f;
-                _selectedPayment = null;
-              }),
-              emptyIcon: Icons.receipt_long_outlined,
-              emptyText:
-                  'Aucune facture. Dans « ${_voyageModuleTitles[widget.module]} », onglet Validés, cochez les saisies puis « Créer la facture ».',
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 320,
+              child: ErpGrid<FactureAgent>(
+                key: ValueKey('agent-invoices-grid-${widget.module}'),
+                columns: _columns,
+                rows: rows,
+                rowId: (f) => f.id,
+                filterable: true,
+                selected: selected,
+                onSelect: (f) => setState(() {
+                  _selected = f;
+                  _selectedPayment = null;
+                }),
+                emptyIcon: Icons.receipt_long_outlined,
+                emptyText:
+                    'Aucune facture. Dans « ${_voyageModuleTitles[widget.module]} », onglet Validés, cochez les saisies puis « Créer la facture ».',
+              ),
             ),
-          ),
-          if (selected != null) ...[
-            const SizedBox(height: 12),
-            _buildDetails(selected),
-            const SizedBox(height: 12),
-            _buildPayments(selected),
+            if (selected != null) ...[
+              const SizedBox(height: 12),
+              _buildDetails(selected),
+              const SizedBox(height: 12),
+              _buildPayments(selected),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

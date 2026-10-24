@@ -417,6 +417,18 @@ class _DossiersPageState extends State<DossiersPage> {
                 onPressed: hasSelection ? () => _close(selected) : null,
               ),
               ErpActionButton(
+                key: const ValueKey('dossier-report'),
+                label: hasSelection
+                    ? 'Rapport du dossier'
+                    : 'Rapport des dossiers affichés',
+                icon: Icons.analytics_outlined,
+                color: const Color(0xFF7C3AED),
+                onPressed: () => _showDossierReport(
+                  context,
+                  hasSelection ? [selected] : _filtered,
+                ),
+              ),
+              ErpActionButton(
                 key: const ValueKey('dossier-export'),
                 label: 'Exporter',
                 icon: Icons.file_download_outlined,
