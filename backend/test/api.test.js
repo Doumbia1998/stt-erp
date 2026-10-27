@@ -93,7 +93,7 @@ test('login rejects wrong credentials and protects data routes', async () => {
   });
   assert.equal(ok.status, 200);
   assert.equal(ok.body.utilisateur.role, 'Administrateur');
-  assert.equal(ok.body.utilisateur.modules.length, 10);
+  assert.equal(ok.body.utilisateur.modules.length, 11);
   token = ok.body.jeton;
 });
 
@@ -940,4 +940,60 @@ test('voyages are assigned to Frontière, Bureau DD and Enquête agents', async 
   assert.equal(saved.reglements[0].montant, 35000);
   assert.equal(after.body.affectationsVoyage[0].factureId, 'fa-1');
   assert.equal((await call('DELETE', '/factures-agent/fa-1', undefined, agentToken)).status, 409);
+});
+
+test('cash vouchers pay truck fees and administrative expenses', async () => {
+  // Un compte détaillé choisi pour un type de frais est utilisé tel quel.
+  const gasoil = await call('PUT', '/types-frais/frais-bc', {
+    libelle: 'gasoil',
+    montant: 0,
+    compteGeneral: '65880001',
+  });
+  assert.equal(gasoil.status, 200);
+  assert.equal(gasoil.body.type.compte, '65880001');
+  assert.equal(gasoil.body.compteCree, null);
+
+  const bon = await call('PUT', '/bons-caisse/bc-1', {
+    categorie: 'Frais camion',
+    date: '20/10/2026',
+    codeJournal: 'BQ',
+    beneficiaire: 'Chauffeurs',
+    lignes: [
+      { plaque: 'ab 1234 md', proprietaire: 'Transporteur', typeFraisId: 'frais-bc', montant: 7000 },
+      { plaque: 'STT 01', proprietaire: 'STT', typeFraisId: 'frais-bc', montant: 5000 },
+    ],
+  });
+  assert.equal(bon.status, 200);
+  assert.equal(bon.body.montant, 12000);
+  assert.ok(bon.body.numero >= 1);
+  assert.equal(bon.body.lignes[0].compte, '65880001');
+  assert.equal(bon.body.lignes[0].libelle, 'GASOIL');
+
+  const admin = {
+    categorie: 'Dépense administrative',
+    date: '21/10/2026',
+    codeJournal: 'BQ',
+    beneficiaire: 'DG',
+    lignes: [{ libelle: 'Carburant DG', compte: '65880002', montant: 30000 }],
+  };
+  assert.equal((await call('PUT', '/bons-caisse/bc-2', admin)).status, 400);
+  assert.equal(
+    (await call('PUT', '/bons-caisse/bc-2', { ...admin, motif: 'Mission', lignes: [{ libelle: 'x', montant: 1 }] })).status,
+    400,
+  );
+  assert.equal((await call('PUT', '/bons-caisse/bc-2', { ...admin, motif: 'Mission Bamako' })).status, 200);
+
+  const data = await call('GET', '/donnees');
+  assert.equal(data.body.bonsCaisse.length, 2);
+  assert.equal(data.body.bonsCaisse[0].lignes[1].proprietaire, 'STT');
+
+  await call('POST', '/comptabilite/mise-a-jour', {
+    du: '01/10/2026',
+    au: '31/10/2026',
+    categories: ['depenses'],
+  });
+  const piece = `BC-${String(bon.body.numero).padStart(5, '0')}`;
+  const bank = await call('GET', '/comptabilite/ecritures?journal=BQ&mois=2026-10');
+  assert.ok(bank.body.some((l) => l.piece === piece && l.credit === 12000));
+  assert.ok(bank.body.some((l) => l.piece === piece && l.compte === '65880001' && l.debit === 7000));
 });

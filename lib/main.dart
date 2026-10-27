@@ -22,6 +22,7 @@ export 'models.dart';
 part 'pages/balance_comptes_page.dart';
 part 'pages/comptabilite_pages.dart';
 part 'pages/dossier_dialogs.dart';
+part 'pages/depenses_frais_page.dart';
 part 'pages/dossiers_page.dart';
 part 'pages/facture_transitaire_page.dart';
 part 'pages/facture_transporteur_page.dart';
@@ -129,6 +130,7 @@ final List<FactureTransporteur> _facturesTransporteur = [];
 final List<AffectationVoyage> _affectationsVoyage = [];
 final List<AgentVoyage> _agentsVoyage = [];
 final List<FactureAgent> _facturesAgent = [];
+final List<BonCaisse> _bonsCaisse = [];
 
 void _loadErpData(ErpData data) {
   _currentUser = data.user;
@@ -174,6 +176,9 @@ void _loadErpData(ErpData data) {
   _facturesAgent
     ..clear()
     ..addAll(data.facturesAgent);
+  _bonsCaisse
+    ..clear()
+    ..addAll(data.bonsCaisse);
 }
 
 class TransitTrackerApp extends StatelessWidget {
@@ -594,6 +599,7 @@ class MainNavigationPage extends StatefulWidget {
       'Frontière',
       'Bureau DD',
       'Enquête',
+      'Dépenses & Frais',
     },
   });
   @override
@@ -652,12 +658,19 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       ErpMenuItem('Gestion des Transitaires & Chargeurs', Icons.groups_rounded),
       ErpMenuItem('Clients', Icons.people_rounded),
     ]),
+    ErpModule('Dépenses & Frais', Icons.local_gas_station_rounded, [
+      ErpMenuItem('Paiement Frais', Icons.local_gas_station_rounded),
+      ErpMenuItem(
+        'Dépenses administratives',
+        Icons.account_balance_wallet_rounded,
+      ),
+      ErpMenuItem('Types de frais', Icons.category_rounded),
+    ]),
     ErpModule('Comptabilité', Icons.account_balance_rounded, [
       ErpMenuItem('Balance des Comptes', Icons.balance_rounded),
       ErpMenuItem('Balance Agées', Icons.pending_actions_rounded),
       ErpMenuItem('Control des Caisses', Icons.point_of_sale_rounded),
       ErpMenuItem('Règlements', Icons.payments_rounded),
-      ErpMenuItem('Dépenses & Frais', Icons.receipt_long_rounded),
       ErpMenuItem('Interrogation et Lettrage', Icons.search_rounded),
       ErpMenuItem('Grand-Livre des Tiers', Icons.menu_book_rounded),
       ErpMenuItem('Saisie des Journaux', Icons.edit_note_rounded),
@@ -859,7 +872,11 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           comptes: _planAccounts,
           modes: _modesReglement,
         );
-      case 'Dépenses & Frais':
+      case 'Paiement Frais':
+        return PaiementFraisPage();
+      case 'Dépenses administratives':
+        return DepensesAdministrativesPage();
+      case 'Types de frais':
         return TypesFraisPage(types: _typesFrais, comptes: _planAccounts);
       case 'Balance des Comptes':
         return BalanceComptesPage(
@@ -1669,7 +1686,7 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
       case 'Recouvreur':
         return {'Recouvrement'};
       case 'Comptable':
-        return {'Comptabilité', 'Recouvrement'};
+        return {'Comptabilité', 'Recouvrement', 'Dépenses & Frais'};
       case 'Prestataire':
         return {'Prestation'};
       case 'Transporteur':

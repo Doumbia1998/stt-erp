@@ -21,12 +21,13 @@ class _TypesFraisPageState extends State<TypesFraisPage> {
   bool _saving = false;
   int _formVersion = 0;
 
-  // Comptes généraux de charges (classe 6) auxquels rattacher les frais.
-  List<PlanAccount> get _generals =>
-      widget.comptes
-          .where((a) => a.code.startsWith('6') && isGeneralAccountCode(a.code))
-          .toList()
-        ..sort((a, b) => a.code.compareTo(b.code));
+  // Tout le plan comptable, comptes de charges (classe 6) en premier.
+  List<PlanAccount> get _accounts => [...widget.comptes]
+    ..sort((a, b) {
+      final ca = a.code.startsWith('6') ? 0 : 1;
+      final cb = b.code.startsWith('6') ? 0 : 1;
+      return ca != cb ? ca - cb : a.code.compareTo(b.code);
+    });
 
   String _accountLabel(String code) {
     if (code.isEmpty) return '';
@@ -72,8 +73,7 @@ class _TypesFraisPageState extends State<TypesFraisPage> {
     _montant.text = type == null || type.montant == 0
         ? ''
         : type.montant.toStringAsFixed(0);
-    final generals = _generals.map((a) => a.code);
-    _general = generals.contains(type?.compteGeneral)
+    _general = widget.comptes.any((a) => a.code == type?.compteGeneral)
         ? type!.compteGeneral
         : null;
   });
@@ -82,6 +82,8 @@ class _TypesFraisPageState extends State<TypesFraisPage> {
   String get _subAccountPreview {
     final general = _general;
     if (general == null) return '';
+    // Compte détaillé choisi : utilisé tel quel.
+    if (!isGeneralAccountCode(general)) return '';
     final editing = _editing;
     if (editing != null &&
         editing.compteGeneral == general &&
@@ -106,7 +108,7 @@ class _TypesFraisPageState extends State<TypesFraisPage> {
           onSelect: _edit,
           emptyIcon: Icons.receipt_long_outlined,
           emptyText:
-              'Aucun type de frais. Saisissez un libellé et choisissez son compte général.',
+              'Aucun type de frais. Saisissez un libellé ; le compte comptable peut être ajouté plus tard.',
         );
         final form = _buildForm();
         return ListView(
@@ -238,36 +240,29 @@ class _TypesFraisPageState extends State<TypesFraisPage> {
             },
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            key: ValueKey('fee-type-general-$_formVersion'),
-            isExpanded: true,
-            initialValue: _general,
-            decoration: _inputDecoration(
-              'Compte général *',
-              icon: Icons.account_tree_outlined,
-            ),
-            items: [
-              for (final account in _generals)
-                DropdownMenuItem(
-                  value: account.code,
-                  child: Text(
-                    '${account.code} — ${account.libelle}',
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-            ],
-            validator: (value) =>
-                value == null ? 'Choisissez le compte général' : null,
-            onChanged: (value) => setState(() => _general = value),
+          // Compte facultatif : recherche dans tout le plan comptable.
+          SearchableDropdownFormField<PlanAccount>(
+            key: ValueKey('fee-type-account-$_formVersion'),
+            options: _accounts,
+            value: widget.comptes.where((a) => a.code == _general).firstOrNull,
+            label: 'Compte comptable (facultatif)',
+            emptyText: 'Aucun compte dans le plan comptable',
+            required: false,
+            displayString: (a) => '${a.code} — ${a.libelle}',
+            onChanged: (account) => setState(() => _general = account?.code),
           ),
-          if (_generals.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 6),
-              child: Text(
-                'Aucun compte général de classe 6 (ex. 65880000) dans le plan comptable.',
-                style: TextStyle(color: Color(0xFFB45309), fontSize: 12),
-              ),
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              _general == null
+                  ? 'Sans compte : il pourra être relié plus tard.'
+                  : isGeneralAccountCode(_general!)
+                  ? 'Compte général : un sous-compte est créé pour ce frais.'
+                  : 'Compte détaillé : utilisé tel quel.',
+              key: const ValueKey('fee-type-account-hint'),
+              style: const TextStyle(color: _gridMuted, fontSize: 12),
             ),
+          ),
           if (_subAccountPreview.isNotEmpty) ...[
             const SizedBox(height: 12),
             Container(

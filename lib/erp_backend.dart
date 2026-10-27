@@ -1,6 +1,7 @@
 // Accès aux données de l'ERP : l'API PostgreSQL en production, une version en mémoire pour les tests.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
@@ -35,6 +36,7 @@ class ErpData {
   final List<AffectationVoyage> affectationsVoyage;
   final List<AgentVoyage> agentsVoyage;
   final List<FactureAgent> facturesAgent;
+  final List<BonCaisse> bonsCaisse;
 
   const ErpData({
     required this.user,
@@ -52,6 +54,7 @@ class ErpData {
     this.affectationsVoyage = const [],
     this.agentsVoyage = const [],
     this.facturesAgent = const [],
+    this.bonsCaisse = const [],
   });
 }
 
@@ -166,6 +169,10 @@ abstract class ErpBackend {
   Future<String?> photoT1(AffectationVoyage affectation);
   Future<void> saveFactureAgent(FactureAgent facture);
   Future<void> deleteFactureAgent(FactureAgent facture);
+
+  // Bons de caisse (frais des camions, dépenses administratives).
+  Future<void> saveBonCaisse(BonCaisse bon);
+  Future<void> deleteBonCaisse(BonCaisse bon);
 
   // Comptabilité générée depuis la gestion.
   Future<MiseAJourResultat> miseAJourComptable({
@@ -291,6 +298,10 @@ class HttpErpBackend implements ErpBackend {
       facturesAgent: ((json['facturesAgent'] as List?) ?? const [])
           .cast<Map<String, dynamic>>()
           .map(factureAgentFromJson)
+          .toList(),
+      bonsCaisse: ((json['bonsCaisse'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(bonCaisseFromJson)
           .toList(),
       dossiers: [
         for (final dossier in rows('dossiers'))
@@ -465,6 +476,32 @@ class HttpErpBackend implements ErpBackend {
   Future<void> deleteFactureAgent(FactureAgent facture) =>
       _send('DELETE', '/factures-agent/${_segment(facture.id)}');
 
+  @override
+  Future<void> saveBonCaisse(BonCaisse bon) async {
+    final result =
+        await _send(
+              'PUT',
+              '/bons-caisse/${_segment(bon.id)}',
+              bonCaisseToJson(bon),
+            )
+            as Map<String, dynamic>;
+    bon
+      ..version = (result['version'] as num).toInt()
+      ..numero = (result['numero'] as num?)?.toInt() ?? bon.numero;
+    // Compte et libellé repris du type de frais par le serveur.
+    final lines = (result['lignes'] as List?) ?? const [];
+    for (final (i, l) in lines.indexed) {
+      if (i >= bon.lignes.length) break;
+      bon.lignes[i]
+        ..compte = l['compte'] as String? ?? bon.lignes[i].compte
+        ..libelle = l['libelle'] as String? ?? bon.lignes[i].libelle;
+    }
+  }
+
+  @override
+  Future<void> deleteBonCaisse(BonCaisse bon) =>
+      _send('DELETE', '/bons-caisse/${_segment(bon.id)}');
+
   static double _numOf(Object? value, double fallback) =>
       (value as num?)?.toDouble() ?? fallback;
 
@@ -609,6 +646,7 @@ class MemoryErpBackend implements ErpBackend {
   final List<AffectationVoyage> affectationsVoyage = [];
   final List<AgentVoyage> agentsVoyage = [];
   final List<FactureAgent> facturesAgent = [];
+  final List<BonCaisse> bonsCaisse = [];
   final Map<String, String> photosT1 = {};
   final Map<String, String> _passwords = {};
 
@@ -631,6 +669,7 @@ class MemoryErpBackend implements ErpBackend {
             'Frontière',
             'Bureau DD',
             'Enquête',
+            'Dépenses & Frais',
           },
         ),
       ] {
@@ -681,6 +720,7 @@ class MemoryErpBackend implements ErpBackend {
       affectationsVoyage: [...affectationsVoyage],
       agentsVoyage: [...agentsVoyage],
       facturesAgent: [...facturesAgent],
+      bonsCaisse: [...bonsCaisse],
     );
   }
 
@@ -741,6 +781,9 @@ class MemoryErpBackend implements ErpBackend {
     final previous = typesFrais.where((t) => t.id == type.id).firstOrNull;
     if (type.compteGeneral.isEmpty) {
       type.compte = '';
+    } else if (!isGeneralAccountCode(type.compteGeneral)) {
+      // Compte détaillé choisi : utilisé tel quel.
+      type.compte = type.compteGeneral;
     } else if (previous?.compteGeneral != type.compteGeneral ||
         type.compte.isEmpty) {
       type.compte = nextSubAccountCode(type.compteGeneral, [
@@ -920,6 +963,25 @@ class MemoryErpBackend implements ErpBackend {
     if (facture.numero == 0) facture.numero = facturesAgent.length + 1;
     _upsert(facturesAgent, facture, (f) => f.id == facture.id);
   }
+
+  @override
+  Future<void> saveBonCaisse(BonCaisse bon) async {
+    for (final l in bon.lignes) {
+      final type = typesFrais.where((t) => t.id == l.typeFraisId).firstOrNull;
+      if (type == null) continue;
+      if (l.compte.isEmpty) l.compte = type.compte;
+      if (l.libelle.isEmpty) l.libelle = type.libelle;
+    }
+    bon.version += 1;
+    if (bon.numero == 0) {
+      bon.numero = bonsCaisse.fold(0, (m, b) => math.max(m, b.numero)) + 1;
+    }
+    _upsert(bonsCaisse, bon, (b) => b.id == bon.id);
+  }
+
+  @override
+  Future<void> deleteBonCaisse(BonCaisse bon) async =>
+      bonsCaisse.removeWhere((b) => b.id == bon.id);
 
   @override
   Future<void> deleteFactureAgent(FactureAgent facture) async {

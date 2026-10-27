@@ -409,6 +409,49 @@ async function buildEntries(client, du, au, categories) {
     }
   }
 
+  // Bons de caisse : frais des camions et dépenses administratives.
+  if (wanted.has('depenses')) {
+    const { rows: bons } = await client.query(
+      `SELECT b.id, b.numero, b.categorie, b.date, b.code_journal, b.beneficiaire, b.motif,
+         l.position, l.compte, l.libelle, l.plaque, l.montant
+       FROM bons_caisse b JOIN bon_caisse_lignes l ON l.bon_id = b.id
+       WHERE b.date BETWEEN $1 AND $2
+       ORDER BY b.numero, l.position`,
+      [du, au],
+    );
+    const byBon = new Map();
+    for (const row of bons) {
+      if (!byBon.has(row.id)) byBon.set(row.id, []);
+      byBon.get(row.id).push(row);
+    }
+    for (const [id, rows] of byBon) {
+      const bon = rows[0];
+      const piece = `BC-${String(bon.numero).padStart(5, '0')}`;
+      if (!bon.code_journal) {
+        ignored.push(`Bon de caisse sans caisse (${piece})`);
+        continue;
+      }
+      const total = round(rows.reduce((s, r) => s + Number(r.montant), 0));
+      push({
+        journal: bon.code_journal,
+        categorie: 'depenses',
+        date: bon.date,
+        piece,
+        libelle: `${bon.categorie} • ${bon.motif || bon.beneficiaire || piece}`,
+        source: `bon-caisse:${id}`,
+        lines: [
+          ...rows.map((r) => ({
+            compte: r.compte || COMPTES.charges,
+            libelle: [r.libelle, r.plaque].filter(Boolean).join(' • '),
+            debit: round(Number(r.montant)),
+            credit: 0,
+          })),
+          { compte: treasuryOf(bon.code_journal), libelle: piece, debit: 0, credit: total },
+        ],
+      });
+    }
+  }
+
   if (wanted.has('paie')) ignored.push('Salaires / Paie : aucune donnée de paie dans la gestion.');
   return { entries, ignored };
 }

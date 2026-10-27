@@ -471,7 +471,7 @@ function referentielsRouter(pool) {
   });
 
   // Type de frais : un sous-compte est créé sous le compte général choisi.
-  router.put('/types-frais/:id', requireModule('Comptabilité', 'Transport'), async (req, res, next) => {
+  router.put('/types-frais/:id', requireModule('Dépenses & Frais', 'Comptabilité', 'Transport'), async (req, res, next) => {
     try {
       const b = req.body;
       const typeId = id(req);
@@ -486,8 +486,14 @@ function referentielsRouter(pool) {
         const existing = current[0];
         let compte = existing?.compte ?? null;
         let created = null;
+        // Compte général (ex. 65880000) : un sous-compte est créé ; compte détaillé : utilisé tel quel.
+        const detailed = Boolean(general) && !(/^\d{4,}$/.test(general) && general.endsWith('00'));
         if (!general) {
           compte = null;
+        } else if (detailed) {
+          const { rows: chosen } = await client.query('SELECT 1 FROM plan_comptable WHERE code = $1', [general]);
+          if (chosen.length === 0) throw notFound('Compte comptable introuvable.');
+          compte = general;
         } else if (existing?.compte_general !== general || !compte) {
           const { rows: parent } = await client.query(
             'SELECT nature FROM plan_comptable WHERE code = $1',
@@ -504,7 +510,8 @@ function referentielsRouter(pool) {
             [`compte-${crypto.randomUUID()}`, compte, libelle, parent[0].nature],
           );
           created = rows[0];
-        } else {
+        } else if (compte !== general) {
+          // Le libellé du sous-compte créé pour ce frais suit le libellé du frais.
           await client.query(
             'UPDATE plan_comptable SET libelle = $2, modifie_le = now() WHERE code = $1',
             [compte, libelle],
@@ -528,7 +535,7 @@ function referentielsRouter(pool) {
     }
   });
 
-  router.delete('/types-frais/:id', requireModule('Comptabilité', 'Transport'), async (req, res, next) => {
+  router.delete('/types-frais/:id', requireModule('Dépenses & Frais', 'Comptabilité', 'Transport'), async (req, res, next) => {
     try {
       const { rowCount } = await pool.query('DELETE FROM types_frais WHERE id = $1', [id(req)]);
       if (rowCount === 0) throw notFound('Type de frais introuvable.');

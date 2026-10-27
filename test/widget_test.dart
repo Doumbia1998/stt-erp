@@ -1336,14 +1336,28 @@ void main() {
     await tester.pumpAndSettle();
 
     // Type de frais : AMENDE devient le sous-compte 65880001.
-    await open('Comptabilité', 'Dépenses & Frais');
+    await open('Dépenses & Frais', 'Types de frais');
     await tester.enterText(
       find.byKey(const ValueKey('fee-type-label')),
       'amende',
     );
-    await tester.tap(find.byKey(const ValueKey('fee-type-general-0')));
+    // Compte facultatif : recherche dans le plan comptable.
+    await tester.enterText(
+      find.descendant(
+        of: find.byKey(const ValueKey('fee-type-account-0')),
+        matching: find.byType(TextFormField),
+      ),
+      '6588',
+    );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('65880000 — Autres charges diverses').last);
+    await tester.tap(
+      find
+          .descendant(
+            of: find.byType(ListTile),
+            matching: find.text('65880000 — Autres charges diverses'),
+          )
+          .last,
+    );
     await tester.pumpAndSettle();
     expect(
       tester
@@ -1363,6 +1377,76 @@ void main() {
       findsOneWidget,
     );
     expect(backend.typesFrais.single.compte, '65880001');
+
+    // Paiement Frais : bon de caisse numéroté pour le camion d'un dossier.
+    await open('Dépenses & Frais', 'Paiement Frais');
+    final trucks = find.byKey(const ValueKey('fee-trucks-grid'));
+    await tester.tap(
+      find.descendant(of: trucks, matching: find.text('STT-CAISSE')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('fee-voucher-new')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('voucher-line-0-amount')),
+      '15000',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('voucher-save')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Fermer').last);
+    await tester.pumpAndSettle();
+    final voucher = backend.bonsCaisse.single;
+    expect(voucher.reference, 'BC-00001');
+    expect(voucher.montant, 15000);
+    expect(voucher.codeJournal, 'CA');
+    expect(voucher.lignes.single.compte, '65880001');
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('fee-vouchers-grid')),
+        matching: find.text('BC-00001'),
+      ),
+      findsOneWidget,
+    );
+
+    // Dépense administrative : motif et compte comptable obligatoires.
+    await open('Dépenses & Frais', 'Dépenses administratives');
+    await tester.tap(find.byKey(const ValueKey('admin-voucher-new')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('admin-beneficiary-DG')));
+    await tester.enterText(
+      find.byKey(const ValueKey('admin-motif')),
+      'Mission à Bamako',
+    );
+    await tester.enterText(find.byKey(const ValueKey('admin-amount')), '50000');
+    await tester.tap(find.byKey(const ValueKey('admin-voucher-save')));
+    await tester.pumpAndSettle();
+    expect(backend.bonsCaisse, hasLength(1));
+    await tester.enterText(
+      find.descendant(
+        of: find.byKey(const ValueKey('admin-account-0')),
+        matching: find.byType(TextFormField),
+      ),
+      '65880001',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find
+          .descendant(
+            of: find.byType(ListTile),
+            matching: find.textContaining('65880001 —'),
+          )
+          .last,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('admin-voucher-save')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Fermer').last);
+    await tester.pumpAndSettle();
+    final admin = backend.bonsCaisse.last;
+    expect(admin.reference, 'BC-00002');
+    expect(admin.beneficiaire, 'DG');
+    expect(admin.lignes.single.compte, '65880001');
 
     // Contrôle de caisse : compte général du journal et compte tiers.
     await open('Comptabilité', 'Control des Caisses');

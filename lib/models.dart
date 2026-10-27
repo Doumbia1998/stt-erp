@@ -891,3 +891,76 @@ class FactureAgent {
   String get dernierReglement =>
       reglements.isEmpty ? '' : reglements.last.date.split(' ').first;
 }
+
+// Type de prestataire qui porte nos propres camions (flotte STT).
+const typeFlotteStt = 'Flotte STT';
+
+// Ligne d'un bon de caisse : un frais d'un camion ou une dépense administrative.
+class BonCaisseLigne {
+  String dossierId;
+  String plaque;
+  // « Transporteur » (camion d'un transporteur) ou « STT » (nos camions).
+  String proprietaire;
+  String transporteurId;
+  String chauffeur;
+  String telephone;
+  String typeFraisId;
+  String compte;
+  String libelle;
+  double montant;
+
+  BonCaisseLigne({
+    this.dossierId = '',
+    this.plaque = '',
+    this.proprietaire = '',
+    this.transporteurId = '',
+    this.chauffeur = '',
+    this.telephone = '',
+    this.typeFraisId = '',
+    this.compte = '',
+    this.libelle = '',
+    this.montant = 0,
+  });
+}
+
+// Bon de caisse numéroté : frais des camions ou dépense administrative.
+class BonCaisse {
+  final String id;
+  int numero;
+  final String categorie;
+  String date;
+  String codeJournal;
+  String beneficiaire;
+  String motif;
+  String referenceManuelle;
+  String observations;
+  List<BonCaisseLigne> lignes;
+  String auteur;
+  String dateSaisie;
+  int version;
+
+  static const fraisCamion = 'Frais camion';
+  static const depenseAdministrative = 'Dépense administrative';
+
+  BonCaisse({
+    required this.id,
+    this.numero = 0,
+    required this.categorie,
+    required this.date,
+    this.codeJournal = '',
+    this.beneficiaire = '',
+    this.motif = '',
+    this.referenceManuelle = '',
+    this.observations = '',
+    List<BonCaisseLigne>? lignes,
+    this.auteur = '',
+    this.dateSaisie = '',
+    this.version = 0,
+  }) : lignes = lignes ?? [];
+
+  String get reference =>
+      numero == 0 ? 'BC-…' : 'BC-${numero.toString().padLeft(5, '0')}';
+  double get montant => lignes.fold(0, (s, l) => s + l.montant);
+  int get nbCamions =>
+      lignes.map((l) => l.plaque).where((p) => p.isNotEmpty).toSet().length;
+}

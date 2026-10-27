@@ -719,3 +719,59 @@ Map<String, dynamic> factureAgentToJson(FactureAgent f) => {
       },
   ],
 };
+
+BonCaisse bonCaisseFromJson(Map<String, dynamic> json) => BonCaisse(
+  id: json['id'] as String,
+  numero: (json['numero'] as num?)?.toInt() ?? 0,
+  categorie: _str(json['categorie']),
+  date: _str(json['date']),
+  codeJournal: _str(json['codeJournal']),
+  beneficiaire: _str(json['beneficiaire']),
+  motif: _str(json['motif']),
+  referenceManuelle: _str(json['referenceManuelle']),
+  observations: _str(json['observations']),
+  lignes: [
+    for (final l in (json['lignes'] as List? ?? const []))
+      BonCaisseLigne(
+        dossierId: _str(l['dossierId']),
+        plaque: _str(l['plaque']),
+        proprietaire: _str(l['proprietaire']),
+        transporteurId: _str(l['transporteurId']),
+        chauffeur: _str(l['chauffeur']),
+        telephone: _str(l['telephone']),
+        typeFraisId: _str(l['typeFraisId']),
+        compte: _str(l['compte']),
+        libelle: _str(l['libelle']),
+        montant: _num(l['montant']),
+      ),
+  ],
+  auteur: _str(json['auteur']),
+  dateSaisie: _str(json['dateSaisie']),
+  version: (json['version'] as num?)?.toInt() ?? 0,
+);
+
+Map<String, dynamic> bonCaisseToJson(BonCaisse b) => {
+  'categorie': b.categorie,
+  'date': b.date,
+  'codeJournal': b.codeJournal,
+  'beneficiaire': b.beneficiaire,
+  'motif': b.motif,
+  'referenceManuelle': b.referenceManuelle,
+  'observations': b.observations,
+  'version': b.version,
+  'lignes': [
+    for (final l in b.lignes)
+      {
+        'dossierId': l.dossierId,
+        'plaque': l.plaque,
+        'proprietaire': l.proprietaire,
+        'transporteurId': l.transporteurId,
+        'chauffeur': l.chauffeur,
+        'telephone': l.telephone,
+        'typeFraisId': l.typeFraisId,
+        'compte': l.compte,
+        'libelle': l.libelle,
+        'montant': l.montant,
+      },
+  ],
+};
