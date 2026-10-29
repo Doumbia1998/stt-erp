@@ -2098,4 +2098,77 @@ void main() {
       );
     },
   );
+
+  testWidgets('A carrier payment can be validated partially without journal', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final backend = erpBackend as MemoryErpBackend;
+    final carrier = Prestataire(
+      id: 'stl',
+      entreprise: 'STL',
+      type: 'Transporteur',
+      pays: 'Mali',
+      villePort: 'Bamako',
+      contact: '',
+      telephone: '',
+      email: '',
+      services: '',
+    );
+    final facture = FactureTransporteur(
+      id: 'ftr-1',
+      reference: 'FAC-TRP-1026-0001',
+      transporteurId: 'stl',
+      plaque: 'AA 647 BZ',
+      dateEmission: '16/10/2026',
+      montant: 2500000,
+    );
+    backend
+      ..prestataires.add(carrier)
+      ..facturesTransporteur.add(facture);
+
+    await tester.pumpWidget(const TransitTrackerApp());
+    await tester.enterText(find.byType(TextField).at(0), 'admin');
+    await tester.enterText(find.byType(TextField).at(1), '1234');
+    await tester.tap(find.text('SE CONNECTER'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Recouvrement'));
+    await tester.tap(find.byTooltip('Recouvrement'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Saisie des Règlements Transporteurs').last);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('reglement-soldes-grid')),
+        matching: find.text('STL'),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('reglement-amount')),
+      '2000000',
+    );
+    await tester.tap(find.byKey(const ValueKey('reglement-save')));
+    await tester.pumpAndSettle();
+    // Montant reçu imputé en partie, sans journal : VALIDER reste actif.
+    await tester.enterText(
+      find.byKey(const ValueKey('echeance-ftr-1')),
+      '1500000',
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const ValueKey('echeances-valider')))
+          .onPressed,
+      isNotNull,
+    );
+    await tester.tap(find.byKey(const ValueKey('echeances-valider')));
+    await tester.pumpAndSettle();
+    expect(facture.reglements.single.montant, 1500000);
+    expect(facture.reliquat, 1000000);
+  });
 }

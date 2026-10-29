@@ -825,6 +825,7 @@ class _ReglementsTiersPageState extends State<ReglementsTiersPage> {
       journal: _journal,
       mode: mode ?? _mode,
       modes: _modesPaiement,
+      partiel: !_isClient,
     ),
   );
 
@@ -1051,6 +1052,9 @@ class _EcheancesDialog extends StatefulWidget {
   final String? journal;
   final String mode;
   final List<String> modes;
+  // Fournisseurs, transitaires, transporteurs : le montant reçu peut être
+  // imputé en partie et le journal est facultatif.
+  final bool partiel;
 
   const _EcheancesDialog({
     required this.echeances,
@@ -1059,6 +1063,7 @@ class _EcheancesDialog extends StatefulWidget {
     required this.journal,
     required this.mode,
     required this.modes,
+    this.partiel = false,
   });
 
   @override
@@ -1103,11 +1108,16 @@ class _EcheancesDialogState extends State<_EcheancesDialog> {
     }
   }
 
-  bool get _valide =>
-      _journal != null &&
-      _regle > 0 &&
-      (_impute - _regle).abs() < 0.01 &&
-      widget.echeances.every((e) => _part(e.id) <= e.solde + 0.01);
+  bool get _valide {
+    final parts = widget.echeances.every((e) => _part(e.id) <= e.solde + 0.01);
+    if (widget.partiel) {
+      return _impute > 0 && _impute <= _regle + 0.01 && parts;
+    }
+    return _journal != null &&
+        _regle > 0 &&
+        (_impute - _regle).abs() < 0.01 &&
+        parts;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1283,6 +1293,14 @@ class _EcheancesDialogState extends State<_EcheancesDialog> {
                 ),
               ),
             ),
+            if (widget.partiel && _journal == null)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                  'Sans journal, ce règlement ne passera pas en comptabilité : choisissez-le si possible.',
+                  style: TextStyle(color: Color(0xFFC2410C), fontSize: 12),
+                ),
+              ),
             const SizedBox(height: 12),
             Container(
               color: const Color(0xFFF0FDF4),
@@ -1323,7 +1341,8 @@ class _EcheancesDialogState extends State<_EcheancesDialog> {
         FilledButton(
           key: const ValueKey('echeances-valider'),
           style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFF14532D),
+            backgroundColor: const Color(0xFF15803D),
+            foregroundColor: Colors.white,
           ),
           onPressed: _valide
               ? () => Navigator.pop<_Repartition>(context, (
@@ -1331,7 +1350,7 @@ class _EcheancesDialogState extends State<_EcheancesDialog> {
                     for (final e in widget.echeances)
                       if (_part(e.id) > 0) e.id: _part(e.id),
                   },
-                  journal: _journal!,
+                  journal: _journal ?? '',
                   mode: _mode,
                 ))
               : null,
