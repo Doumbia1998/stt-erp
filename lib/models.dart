@@ -992,6 +992,9 @@ class CaisseMouvement {
   // Virement : date et auteur de la réception par la caisse de destination.
   String receptionneLe;
   String receptionnePar;
+  // Encaissement : imputation sur les factures par la comptabilité.
+  String imputeLe;
+  String imputePar;
   final String observations;
   final String auteur;
   final String dateSaisie;
@@ -1014,6 +1017,8 @@ class CaisseMouvement {
     this.bonId = '',
     this.receptionneLe = '',
     this.receptionnePar = '',
+    this.imputeLe = '',
+    this.imputePar = '',
     this.observations = '',
     this.auteur = '',
     this.dateSaisie = '',
@@ -1023,6 +1028,7 @@ class CaisseMouvement {
       recuNumero == 0 ? '' : 'RC-${recuNumero.toString().padLeft(5, '0')}';
   bool get estVirement => type == approvisionnement || type == reversement;
   bool get estReceptionne => receptionneLe.isNotEmpty;
+  bool get estImpute => imputeLe.isNotEmpty;
   // Caisse d'où sort l'argent d'un virement, et caisse qui le reçoit.
   String get caisseSource =>
       type == approvisionnement ? caissePrincipale : caisseDepenses;

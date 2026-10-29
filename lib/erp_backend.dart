@@ -204,6 +204,14 @@ abstract class ErpBackend {
     TransitDossier? dossier,
   });
   Future<CaisseCloture> cloturerCaisse(String caisse);
+  // Administrateur : rouvre la dernière clôture de la caisse.
+  Future<void> rouvrirCaisse(String caisse);
+  // Comptabilité : répartit un encaissement de la caisse sur les factures du client.
+  Future<void> imputerEncaissement(
+    CaisseMouvement mouvement, {
+    required List<(TransitDossier, double)> imputations,
+    required String codeJournal,
+  });
 
   // Comptabilité générée depuis la gestion.
   Future<MiseAJourResultat> miseAJourComptable({
@@ -347,15 +355,22 @@ class HttpErpBackend implements ErpBackend {
       caisseParametres: caisseParametresFromJson(
         (json['caisse'] as Map?)?['parametres'] as Map<String, dynamic>?,
       ),
-      dossiers: [
+      dossiers: _rememberDossiers([
         for (final dossier in rows('dossiers'))
           dossierFromJson(
             dossier,
             clients: clientsById,
             prestataires: prestatairesById,
           ),
-      ],
+      ]),
     );
+  }
+
+  List<TransitDossier> _rememberDossiers(List<TransitDossier> dossiers) {
+    _dossiersById
+      ..clear()
+      ..addAll({for (final d in dossiers) d.id: d});
+    return dossiers;
   }
 
   @override
@@ -639,6 +654,52 @@ class HttpErpBackend implements ErpBackend {
         ..version = (result['version'] as num).toInt();
     }
   }
+
+  @override
+  Future<void> rouvrirCaisse(String caisse) =>
+      _send('POST', '/caisse/clotures/annulation', {'caisse': caisse});
+
+  @override
+  Future<void> imputerEncaissement(
+    CaisseMouvement mouvement, {
+    required List<(TransitDossier, double)> imputations,
+    required String codeJournal,
+  }) async {
+    final result =
+        await _send(
+              'POST',
+              '/caisse/encaissements/${_segment(mouvement.id)}/imputation',
+              {
+                'codeJournal': codeJournal,
+                'imputations': [
+                  for (final (d, montant) in imputations)
+                    {'dossierId': d.id, 'montant': montant},
+                ],
+              },
+            )
+            as Map<String, dynamic>;
+    final dossiers = {for (final (d, _) in imputations) d.id: d};
+    final origine = _dossiersById[mouvement.dossierId];
+    if (origine != null) dossiers[origine.id] = origine;
+    origine?.operations.removeWhere((o) => o.id == mouvement.operationUid);
+    for (final entry in (result['operations'] as List)) {
+      dossiers[entry['dossierId']]?.operations.add(
+        dossierOperationFromJson(entry['operation'] as Map<String, dynamic>),
+      );
+    }
+    for (final entry in (result['dossiers'] as List)) {
+      dossiers[entry['id']]?.version = (entry['version'] as num).toInt();
+    }
+    final saved = caisseMouvementFromJson(
+      result['mouvement'] as Map<String, dynamic>,
+    );
+    mouvement
+      ..imputeLe = saved.imputeLe
+      ..imputePar = saved.imputePar;
+  }
+
+  // Dossiers chargés, pour mettre à jour ceux touchés par une imputation.
+  final Map<String, TransitDossier> _dossiersById = {};
 
   @override
   Future<CaisseCloture> cloturerCaisse(String caisse) async =>
@@ -1305,6 +1366,7 @@ class MemoryErpBackend implements ErpBackend {
       _ => mouvement.caisseSource,
     };
     if (mouvement.estReceptionne ||
+        mouvement.estImpute ||
         caisseClotures.any(
           (c) => c.caisse == caisse && c.date == mouvement.date,
         )) {
@@ -1319,6 +1381,57 @@ class MemoryErpBackend implements ErpBackend {
         ..operations.removeWhere((o) => o.id == mouvement.operationUid)
         ..version += 1;
     }
+  }
+
+  @override
+  Future<void> rouvrirCaisse(String caisse) async {
+    if (_user?.role != 'Administrateur') {
+      throw const ErpBackendException(
+        'Seul l’administrateur peut déclôturer une caisse.',
+        status: 403,
+      );
+    }
+    final last = caisseClotures.where((c) => c.caisse == caisse).lastOrNull;
+    if (last != null) caisseClotures.remove(last);
+  }
+
+  @override
+  Future<void> imputerEncaissement(
+    CaisseMouvement mouvement, {
+    required List<(TransitDossier, double)> imputations,
+    required String codeJournal,
+  }) async {
+    final total = imputations.fold<double>(0, (s, i) => s + i.$2);
+    if (mouvement.estImpute || (total - mouvement.montant).abs() > 0.001) {
+      throw const ErpBackendException('Imputation invalide.', status: 400);
+    }
+    final origine = dossiers
+        .where((d) => d.id == mouvement.dossierId)
+        .firstOrNull;
+    final ancienne = origine?.operations
+        .where((o) => o.id == mouvement.operationUid)
+        .firstOrNull;
+    origine?.operations.remove(ancienne);
+    for (final (n, (d, montant)) in imputations.indexed) {
+      d.operations.add(
+        DossierOperation(
+          id: '${mouvement.id}-i${n + 1}',
+          type: DossierOperationType.clientPayment,
+          titre: ancienne?.titre ?? 'Reçu de caisse ${mouvement.recu}',
+          categorie: 'Règlement Client',
+          montant: montant,
+          date: ancienne?.date ?? mouvement.date,
+          codeJournal: codeJournal,
+          modePaiement: mouvement.modePaiement,
+          observations: 'Imputé par ${_user?.name ?? ''}',
+          auteur: mouvement.auteur,
+        ),
+      );
+      d.version += 1;
+    }
+    mouvement
+      ..imputeLe = _todayFr
+      ..imputePar = _user?.name ?? '';
   }
 
   @override

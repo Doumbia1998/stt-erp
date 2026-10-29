@@ -1087,12 +1087,37 @@ test('the cash desks collect invoices, pay vouchers, transfer and close the day'
   assert.equal((await call('POST', '/caisse/clotures', { caisse: 'Principale' })).status, 409);
   assert.equal((await call('DELETE', '/caisse/mouvements/rc-1')).status, 409);
 
-  // Comptabilité : le bon payé passe dans le journal de la caisse des dépenses.
-  await call('POST', '/comptabilite/mise-a-jour', {
+  // Seul l'administrateur peut déclôturer une caisse clôturée par erreur.
+  assert.equal(
+    (await call('POST', '/caisse/clotures/annulation', { caisse: 'Principale' }, login.body.jeton)).status,
+    403,
+  );
+  const reopened = await call('POST', '/caisse/clotures/annulation', { caisse: 'Principale' });
+  assert.equal(reopened.status, 200);
+  assert.equal(reopened.body.date, todayFr);
+  assert.equal((await call('POST', '/caisse/clotures', { caisse: 'Principale' })).status, 200);
+
+  // Le comptable impute l'encaissement pointé par la caissière.
+  assert.equal(
+    (await call('POST', '/caisse/encaissements/rc-2/imputation', { imputations: [{ dossierId: 'dc1', montant: 100 }] })).status,
+    400,
+  );
+  const imputed = await call('POST', '/caisse/encaissements/rc-2/imputation', {
+    imputations: [{ dossierId: 'dc1', montant: 300000 }],
+  });
+  assert.equal(imputed.status, 200);
+  assert.equal(imputed.body.mouvement.imputeLe, todayFr);
+  assert.equal(imputed.body.operations[0].operation.id, 'rc-2-i1');
+  assert.equal((await call('POST', '/caisse/encaissements/rc-2/imputation', { imputations: [{ dossierId: 'dc1', montant: 300000 }] })).status, 409);
+
+  // Comptabilité : le bon payé passe dans le journal de la caisse des dépenses ;
+  // l'encaissement non imputé attend la comptabilité.
+  const update = await call('POST', '/comptabilite/mise-a-jour', {
     du: todayFr,
     au: todayFr,
     categories: ['depenses', 'reglements'],
   });
+  assert.ok(update.body.ignores.some((i) => i.includes('1 encaissement(s) de caisse pas encore imputé')));
   const cd = await call('GET', `/comptabilite/ecritures?journal=CD&mois=${y}-${m}`);
   const piece = `BC-${String(data.body.bonsCaisse.find((b) => b.id === 'bc-1').numero).padStart(5, '0')}`;
   assert.ok(cd.body.some((l) => l.piece === piece && l.compte === '571002' && l.credit === 12000));
@@ -1100,4 +1125,5 @@ test('the cash desks collect invoices, pay vouchers, transfer and close the day'
   const cp = await call('GET', `/comptabilite/ecritures?journal=CP&mois=${y}-${m}`);
   assert.ok(cp.body.some((l) => l.piece === 'APPRO' && l.compte === '571002' && l.debit === 50000));
   assert.ok(cp.body.some((l) => l.compte === '571001' && l.debit === 300000));
+  assert.ok(!cp.body.some((l) => l.compte === '571001' && l.debit === 200000));
 });

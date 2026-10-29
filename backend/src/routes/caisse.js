@@ -2,7 +2,8 @@ const express = require('express');
 const { withTransaction } = require('../db');
 const { badRequest, conflict, forbidden, notFound } = require('../errors');
 const { requireModule } = require('../auth');
-const { text, optionalRef, amount, oneOf, sqlDateToFr } = require('../format');
+const { text, optionalRef, amount, oneOf, list, sqlDateToFr, sqlDateTimeToFr } = require('../format');
+const { isAdmin } = require('../auth');
 const { isDirection } = require('./facturesAgent');
 
 const PRINCIPALE = 'Principale';
@@ -41,6 +42,8 @@ function mouvementJson(m) {
     bonId: m.bon_id ?? '',
     receptionneLe: sqlDateToFr(m.receptionne_le),
     receptionnePar: m.receptionne_par,
+    imputeLe: sqlDateToFr(m.impute_le),
+    imputePar: m.impute_par,
     observations: m.observations,
     auteur: m.auteur,
     dateSaisie: m.saisie,
@@ -314,6 +317,9 @@ async function annuler(client, id, user) {
     throw forbidden("Seul l'auteur du mouvement ou la Direction peut l'annuler.");
   }
   if (m.type === 'Encaissement') {
+    if (m.impute_le) {
+      throw conflict("Cet encaissement est déjà imputé par la comptabilité : il ne peut plus être annulé.");
+    }
     await verifierOuverte(client, PRINCIPALE, m.date);
   } else if (m.type === 'Paiement bon') {
     await verifierOuverte(client, DEPENSES, m.date);
@@ -361,6 +367,115 @@ async function cloturer(client, body, user) {
     [caisse, date, recettes, depenses, solde, user.nom],
   );
   return { caisse, date: sqlDateToFr(date), recettes, depenses, solde, auteur: user.nom };
+}
+
+// Imputation par la comptabilité : le montant encaissé par la caisse est réparti
+// sur les factures du client (la facture pointée par la caissière ou d'autres).
+async function imputer(client, id, body, user) {
+  const codeJournal = optionalRef(body, 'codeJournal');
+  const imputations = list(body, 'imputations', { max: 200 })
+    .map((i) => ({
+      dossierId: text(i, 'dossierId', { required: true, max: 120 }),
+      montant: amount(i, 'montant', { min: 0 }),
+    }))
+    .filter((i) => i.montant > 0);
+  if (imputations.length === 0) throw badRequest('Indiquez au moins une facture à régler.');
+  await verrouiller(client);
+  const { rows: [m] } = await client.query('SELECT * FROM caisse_mouvements WHERE id = $1 FOR UPDATE', [id]);
+  if (!m || m.type !== 'Encaissement') throw notFound('Encaissement introuvable.');
+  if (m.impute_le) throw conflict('Cet encaissement est déjà imputé.');
+  const total = round(imputations.reduce((s, i) => s + i.montant, 0));
+  if (total !== round(m.montant)) {
+    throw badRequest(`Le total imputé (${total}) doit être égal au montant encaissé (${round(m.montant)}).`);
+  }
+  const journal = codeJournal ?? (await journalDe(client, PRINCIPALE));
+  const { rows: [origine] } = await client.query(
+    `SELECT d.client_id, o.titre, o.mode_paiement, to_char(o.date, 'YYYY-MM-DD HH24:MI:SS') AS date
+     FROM dossiers d LEFT JOIN dossier_operations o ON o.dossier_id = d.id AND o.uid = $2
+     WHERE d.id = $1`,
+    [m.dossier_id, m.operation_uid],
+  );
+  if (!origine) throw notFound('Dossier de l’encaissement introuvable.');
+  await client.query('DELETE FROM dossier_operations WHERE dossier_id = $1 AND uid = $2', [
+    m.dossier_id,
+    m.operation_uid,
+  ]);
+  const versions = new Map();
+  const operations = [];
+  for (const [n, imp] of imputations.entries()) {
+    const { rows: [dossier] } = await client.query(
+      'SELECT id, client_id FROM dossiers WHERE id = $1 FOR UPDATE',
+      [imp.dossierId],
+    );
+    if (!dossier) throw notFound('Dossier introuvable.');
+    if (dossier.client_id !== origine.client_id) {
+      throw badRequest('Les factures imputées doivent appartenir au client de l’encaissement.');
+    }
+    const { rows: [solde] } = await client.query(
+      `SELECT
+         COALESCE((SELECT montant FROM factures WHERE dossier_id = $1 AND type = 'client' AND statut = 'Clôturée'), 0)
+         + COALESCE(sum(montant) FILTER (WHERE type = 'clientInvoice'), 0)
+         - COALESCE(sum(montant) FILTER (WHERE type = 'clientPayment'), 0) AS reste
+       FROM dossier_operations WHERE dossier_id = $1`,
+      [imp.dossierId],
+    );
+    if (imp.montant > round(solde.reste) + 0.001) {
+      throw badRequest(`Le montant imputé dépasse le solde de la facture du dossier (${round(solde.reste)}).`);
+    }
+    const { rows: [{ last }] } = await client.query(
+      'SELECT COALESCE(max(position), -1)::int AS last FROM dossier_operations WHERE dossier_id = $1',
+      [imp.dossierId],
+    );
+    const op = {
+      id: `${id}-i${n + 1}`,
+      type: 'clientPayment',
+      titre: origine.titre || `Reçu de caisse ${recu(m.recu_numero)}`,
+      categorie: 'Règlement Client',
+      montant: imp.montant,
+      date: origine.date || nowSql(),
+      codeJournal: journal,
+      modePaiement: origine.mode_paiement || m.mode_paiement,
+      numeroCheque: '',
+      observations: `Imputé par ${user.nom}`,
+    };
+    await client.query(
+      `INSERT INTO dossier_operations (dossier_id, position, uid, type, titre, categorie,
+         montant, date, code_journal, mode_paiement, numero_cheque, observations, auteur)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      [imp.dossierId, last + 1, op.id, op.type, op.titre, op.categorie, op.montant, op.date,
+        journal, op.modePaiement, '', op.observations, m.auteur],
+    );
+    operations.push({ dossierId: imp.dossierId, operation: { ...op, date: sqlDateTimeToFr(op.date), auteur: m.auteur } });
+    versions.set(imp.dossierId, true);
+  }
+  versions.set(m.dossier_id, true);
+  const dossiers = [];
+  for (const dossierId of versions.keys()) {
+    const { rows: [{ version }] } = await client.query(
+      'UPDATE dossiers SET version = version + 1, modifie_le = now() WHERE id = $1 RETURNING version',
+      [dossierId],
+    );
+    dossiers.push({ id: dossierId, version });
+  }
+  const { rows: [saved] } = await client.query(
+    `UPDATE caisse_mouvements SET impute_le = $2, impute_par = $3, imputations = $4
+     WHERE id = $1 RETURNING *, ${saisieSql('cree_le')} AS saisie`,
+    [id, today(), user.nom, JSON.stringify(imputations)],
+  );
+  return { mouvement: mouvementJson(saved), operations, dossiers };
+}
+
+// Réouverture d'une caisse clôturée par erreur : réservée à l'administrateur.
+async function rouvrir(client, body, user) {
+  if (!isAdmin(user)) throw forbidden("Seul l'administrateur peut déclôturer une caisse.");
+  const caisse = oneOf(body, 'caisse', CAISSES);
+  const { rows: [last] } = await client.query(
+    'SELECT date FROM caisse_clotures WHERE caisse = $1 ORDER BY date DESC LIMIT 1',
+    [caisse],
+  );
+  if (!last) throw notFound("Cette caisse n'a aucune clôture.");
+  await client.query('DELETE FROM caisse_clotures WHERE caisse = $1 AND date = $2', [caisse, last.date]);
+  return { caisse, date: sqlDateToFr(last.date) };
 }
 
 function caisseRouter(pool) {
@@ -412,6 +527,14 @@ function caisseRouter(pool) {
     allowed,
     handle((req, client) => annuler(client, text(req.params, 'id', { required: true, max: 120 }), req.user)),
   );
+  router.post(
+    '/caisse/encaissements/:id/imputation',
+    requireModule('Comptabilité', 'Recouvrement'),
+    handle((req, client) =>
+      imputer(client, text(req.params, 'id', { required: true, max: 120 }), req.body ?? {}, req.user),
+    ),
+  );
+  router.post('/caisse/clotures/annulation', allowed, handle((req, client) => rouvrir(client, req.body ?? {}, req.user)));
   router.post('/caisse/clotures', allowed, handle((req, client) => cloturer(client, req.body ?? {}, req.user)));
   return router;
 }

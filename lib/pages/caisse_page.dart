@@ -91,8 +91,41 @@ Widget _caisseHeader(
   ],
 );
 
-// Bandeau d'alerte : caisse sans journal ou déjà clôturée aujourd'hui.
-Widget? _caisseAlerte(String caisse) {
+// Administrateur : rouvre une caisse clôturée par erreur.
+Future<bool> _declotureCaisse(BuildContext context, String caisse) async {
+  final cloture = _clotureDuJour(caisse);
+  if (cloture == null) return false;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text('Déclôturer la ${_caisseLabel(caisse).toLowerCase()} ?'),
+      content: Text(
+        'La clôture du ${cloture.date} faite par ${cloture.auteur} sera annulée : les mouvements de ce jour pourront de nouveau être saisis ou annulés.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Annuler'),
+        ),
+        FilledButton(
+          key: const ValueKey('caisse-decloture-confirm'),
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Déclôturer'),
+        ),
+      ],
+    ),
+  );
+  if (ok != true || !context.mounted) return false;
+  if (!await _persist(context, () => erpBackend.rouvrirCaisse(caisse))) {
+    return false;
+  }
+  _caisseClotures.remove(cloture);
+  return true;
+}
+
+// Bandeau d'alerte : caisse sans journal ou déjà clôturée aujourd'hui ;
+// l'administrateur peut déclôturer (onReopen).
+Widget? _caisseAlerte(String caisse, {VoidCallback? onReopen}) {
   final cloture = _clotureDuJour(caisse);
   final String? message;
   if (_caisseParametres.journalDe(caisse).isEmpty) {
@@ -119,6 +152,15 @@ Widget? _caisseAlerte(String caisse) {
         Expanded(
           child: Text(message, style: const TextStyle(color: _caisseOrange)),
         ),
+        if (cloture != null &&
+            onReopen != null &&
+            _currentUser?.role == 'Administrateur')
+          TextButton.icon(
+            key: const ValueKey('caisse-decloture'),
+            onPressed: onReopen,
+            icon: const Icon(Icons.lock_open_rounded),
+            label: const Text('Déclôturer'),
+          ),
       ],
     ),
   );
@@ -479,10 +521,33 @@ class _ImpayesPanelState extends State<_ImpayesPanel> {
     );
   }
 
+  // Totaux de toutes les factures des clients recherchés (zéro sans recherche).
+  ({double facture, double regle, double solde}) get _totauxRecherche {
+    final query = _query.trim().toLowerCase();
+    if (query.isEmpty) return (facture: 0, regle: 0, solde: 0);
+    final matching = _dossiers.where(
+      (d) =>
+          d.totalFacturesClient > 0 &&
+          '${d.client.nom} ${d.client.compteComptable} ${d.factureClient.reference} ${d.numBL}'
+              .toLowerCase()
+              .contains(query),
+    );
+    final facture = matching.fold<double>(
+      0,
+      (s, d) => s + d.totalFacturesClient,
+    );
+    final regle = matching.fold<double>(
+      0,
+      (s, d) => s + d.totalReglementsClient,
+    );
+    return (facture: facture, regle: regle, solde: facture - regle);
+  }
+
   @override
   Widget build(BuildContext context) {
     final rows = _rows;
     final selected = rows.where((d) => d.id == _selected?.id).firstOrNull;
+    final totaux = _totauxRecherche;
     final reste = rows.fold<double>(
       0,
       (s, d) => s + math.max(0, d.soldeClient),
@@ -528,7 +593,7 @@ class _ImpayesPanelState extends State<_ImpayesPanel> {
                   key: const ValueKey('impayes-search'),
                   onChanged: (value) => setState(() => _query = value),
                   decoration: InputDecoration(
-                    hintText: 'Client, N° facture, BL, marchandise…',
+                    hintText: 'Nom du client, N° facture, BL…',
                     isDense: true,
                     prefixIcon: const Icon(Icons.search_rounded),
                     border: OutlineInputBorder(
@@ -564,6 +629,32 @@ class _ImpayesPanelState extends State<_ImpayesPanel> {
                   color: _caisseRed,
                   fontWeight: FontWeight.w600,
                 ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            key: const ValueKey('impayes-totaux'),
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              ErpMetricTile(
+                label: 'Total facturé (client recherché)',
+                value: _amountText(totaux.facture),
+                color: _gridAccent,
+                icon: Icons.request_quote_rounded,
+              ),
+              ErpMetricTile(
+                label: 'Total réglé',
+                value: _amountText(totaux.regle),
+                color: _caisseGreen,
+                icon: Icons.check_circle_rounded,
+              ),
+              ErpMetricTile(
+                label: 'Solde client',
+                value: _amountText(totaux.solde),
+                color: _caisseRed,
+                icon: Icons.account_balance_wallet_rounded,
               ),
             ],
           ),
@@ -683,7 +774,14 @@ class _CaisseEncaissementPageState extends State<CaisseEncaissementPage> {
     );
     final pending = _virementsAReceptionner(caissePrincipale);
     final selected = recus.where((m) => m.id == _selectedRecu?.id).firstOrNull;
-    final alerte = _caisseAlerte(caissePrincipale);
+    final alerte = _caisseAlerte(
+      caissePrincipale,
+      onReopen: () async {
+        if (await _declotureCaisse(context, caissePrincipale) && mounted) {
+          setState(() {});
+        }
+      },
+    );
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6FB),
       body: SingleChildScrollView(
@@ -1127,6 +1225,164 @@ class _CaisseDepensesPageState extends State<CaisseDepensesPage> {
   final _search = TextEditingController();
   BonCaisse? _bon;
   bool _searched = false;
+  DateTime? _histDu = DateTime(DateTime.now().year, DateTime.now().month, 1);
+  DateTime? _histAu = DateUtils.dateOnly(DateTime.now());
+  String _histType = 'Tous';
+
+  static const _histTypes = [
+    'Tous',
+    CaisseMouvement.approvisionnement,
+    CaisseMouvement.paiementBon,
+    CaisseMouvement.reversement,
+  ];
+
+  // Mouvements de la caisse des dépenses (entrées et sorties) sur la période.
+  List<CaisseEvenement> get _historique {
+    final events = evenementsCaisse(caisseDepenses, _caisseMouvements)
+        .where(
+          (e) =>
+              (_histType == 'Tous' || e.mouvement.type == _histType) &&
+              _inPeriod(_parseFrDate(e.date), _histDu, _histAu),
+        )
+        .toList();
+    events.sort(
+      (a, b) => (_parseFrDate(b.date) ?? DateTime(0)).compareTo(
+        _parseFrDate(a.date) ?? DateTime(0),
+      ),
+    );
+    return events;
+  }
+
+  static BonCaisse? _bonDe(CaisseMouvement m) =>
+      _bonsCaisse.where((b) => b.id == m.bonId).firstOrNull;
+
+  static final _histColumns = <ErpGridColumn<CaisseEvenement>>[
+    ErpGridColumn(
+      label: 'Date',
+      width: 105,
+      value: (e) => e.date,
+      sortValue: (e) => _parseFrDate(e.date) ?? DateTime(0),
+    ),
+    ErpGridColumn(
+      label: 'Opération',
+      width: 170,
+      value: (e) => e.mouvement.type,
+    ),
+    ErpGridColumn(
+      label: 'N° bon',
+      width: 110,
+      value: (e) => _bonDe(e.mouvement)?.reference ?? '',
+    ),
+    ErpGridColumn(
+      label: 'Bénéficiaire / détail',
+      width: 280,
+      value: (e) {
+        final bon = _bonDe(e.mouvement);
+        if (bon != null) {
+          return [
+            bon.beneficiaire,
+            bon.motif,
+          ].where((t) => t.isNotEmpty).join(' - ');
+        }
+        return e.mouvement.type == CaisseMouvement.approvisionnement
+            ? 'Reçu de la caisse principale'
+            : 'Reversé à la caisse principale';
+      },
+    ),
+    ErpGridColumn(
+      label: 'Entrée',
+      width: 130,
+      numeric: true,
+      value: (e) => e.recette == 0 ? '' : formatCurrency(e.recette),
+      sortValue: (e) => e.recette,
+    ),
+    ErpGridColumn(
+      label: 'Sortie',
+      width: 130,
+      numeric: true,
+      value: (e) => e.depense == 0 ? '' : formatCurrency(e.depense),
+      sortValue: (e) => e.depense,
+    ),
+    ErpGridColumn(label: 'Par', width: 150, value: (e) => e.mouvement.auteur),
+  ];
+
+  Widget _historiqueCard() {
+    final rows = _historique;
+    final entrees = rows.fold<double>(0, (s, e) => s + e.recette);
+    final sorties = rows.fold<double>(0, (s, e) => s + e.depense);
+    return _caisseCard(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 12,
+            runSpacing: 10,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              const Text(
+                'Historique des dépenses et approvisionnements',
+                style: TextStyle(
+                  color: _gridText,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              ErpDateFilter(
+                label: 'Date début',
+                value: _histDu,
+                onChanged: (v) => setState(() => _histDu = v),
+              ),
+              ErpDateFilter(
+                label: 'Date fin',
+                value: _histAu,
+                onChanged: (v) => setState(() => _histAu = v),
+              ),
+              SizedBox(
+                width: 200,
+                child: DropdownButtonFormField<String>(
+                  key: const ValueKey('historique-type'),
+                  initialValue: _histType,
+                  isExpanded: true,
+                  decoration: _inputDecoration('Opération'),
+                  items: [
+                    for (final t in _histTypes)
+                      DropdownMenuItem(value: t, child: Text(t)),
+                  ],
+                  onChanged: (v) => setState(() => _histType = v ?? _histType),
+                ),
+              ),
+              IconButton.filledTonal(
+                tooltip: 'Exporter (Excel)',
+                onPressed: () => _exportGrid(
+                  context,
+                  baseName: 'historique_caisse_depenses',
+                  columns: _histColumns,
+                  rows: rows,
+                ),
+                icon: const Icon(Icons.table_chart_rounded),
+              ),
+              Text(
+                'Entrées ${_amountText(entrees)} • Sorties ${_amountText(sorties)}',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 320,
+            child: ErpGrid<CaisseEvenement>(
+              key: const ValueKey('historique-grid'),
+              columns: _histColumns,
+              rows: rows,
+              rowId: (e) => '${e.mouvement.id}|${e.date}|${e.recette}',
+              filterable: true,
+              emptyText: 'Aucun mouvement sur cette période.',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   void dispose() {
@@ -1199,7 +1455,14 @@ class _CaisseDepensesPageState extends State<CaisseDepensesPage> {
         .where((m) => m.type == CaisseMouvement.paiementBon && m.date == today)
         .toList();
     final pending = _virementsAReceptionner(caisseDepenses);
-    final alerte = _caisseAlerte(caisseDepenses);
+    final alerte = _caisseAlerte(
+      caisseDepenses,
+      onReopen: () async {
+        if (await _declotureCaisse(context, caisseDepenses) && mounted) {
+          setState(() {});
+        }
+      },
+    );
     final bon = _bonsCaisse.where((b) => b.id == _bon?.id).firstOrNull;
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6FB),
@@ -1371,6 +1634,8 @@ class _CaisseDepensesPageState extends State<CaisseDepensesPage> {
                 ],
               ),
             ),
+            const SizedBox(height: 12),
+            _historiqueCard(),
           ],
         ),
       ),
@@ -1624,7 +1889,7 @@ class _ReleveCaissePageState extends State<ReleveCaissePage> {
             'Règlement ${d?.factureClient.reference ?? ''}',
             m.statutReglement,
             if (m.modePaiement.isNotEmpty) m.modePaiement,
-          ].join(' • '),
+          ].join(' - '),
           recette: e.recette,
           solde: solde,
           order: order,
@@ -1638,7 +1903,7 @@ class _ReleveCaissePageState extends State<ReleveCaissePage> {
           libelle: [
             bon?.categorie ?? 'Bon de caisse',
             if ((bon?.motif ?? '').isNotEmpty) bon!.motif,
-          ].join(' • '),
+          ].join(' - '),
           depense: e.depense,
           solde: solde,
           order: order,
@@ -1728,22 +1993,25 @@ class _ReleveCaissePageState extends State<ReleveCaissePage> {
 
   static String _num(double v) => v == 0 ? '' : formatCurrency(v);
 
-  static final _columns = <ErpGridColumn<_ReleveLine>>[
+  // Caisse principale : N° de reçu et client ; caisse des dépenses : N° de bon
+  // et bénéficiaire.
+  List<ErpGridColumn<_ReleveLine>> get _columns => [
     ErpGridColumn(
       label: 'Date',
       width: 95,
       value: (l) => l.date == null ? '' : _dateFormat.format(l.date!),
     ),
-    ErpGridColumn(label: 'N° reçu de caisse', width: 140, value: (l) => l.recu),
-    ErpGridColumn(label: 'N° bon de caisse', width: 140, value: (l) => l.bon),
+    if (_caisse == caissePrincipale)
+      ErpGridColumn(
+        label: 'N° reçu de caisse',
+        width: 150,
+        value: (l) => l.recu,
+      )
+    else
+      ErpGridColumn(label: 'N° bon de caisse', width: 150, value: (l) => l.bon),
     ErpGridColumn(
-      label: 'Compte tiers',
-      width: 120,
-      value: (l) => l.compteTiers,
-    ),
-    ErpGridColumn(
-      label: 'Intitulé client',
-      width: 190,
+      label: _caisse == caissePrincipale ? 'Intitulé client' : 'Bénéficiaire',
+      width: 230,
       value: (l) => l.intitule,
     ),
     ErpGridColumn(
@@ -1866,7 +2134,14 @@ class _ReleveCaissePageState extends State<ReleveCaissePage> {
             ),
             if (cloture != null) ...[
               const SizedBox(height: 12),
-              _caisseAlerte(_caisse)!,
+              _caisseAlerte(
+                _caisse,
+                onReopen: () async {
+                  if (await _declotureCaisse(context, _caisse) && mounted) {
+                    setState(() {});
+                  }
+                },
+              )!,
             ],
             const SizedBox(height: 12),
             _caisseCard(
@@ -2015,6 +2290,7 @@ class _ReleveCaissePageState extends State<ReleveCaissePage> {
   Future<void> _printReleve(List<_ReleveLine> rows) async {
     final logo = await _loadPdfLogo();
     const headerColor = PdfColor.fromInt(0xFF37474F);
+    final principale = _caisse == caissePrincipale;
     final period =
         'Période du ${_start == null ? '…' : _dateFormat.format(_start!)} au ${_end == null ? '…' : _dateFormat.format(_end!)}';
     final doc = pw.Document(
@@ -2067,7 +2343,7 @@ class _ReleveCaissePageState extends State<ReleveCaissePage> {
               ],
             ),
             pw.SizedBox(height: 10),
-            pw.Text(period, style: const pw.TextStyle(fontSize: 9)),
+            pw.Text(period, style: const pw.TextStyle(fontSize: 11)),
             pw.SizedBox(height: 8),
           ],
         ),
@@ -2083,10 +2359,8 @@ class _ReleveCaissePageState extends State<ReleveCaissePage> {
           pw.TableHelper.fromTextArray(
             headers: [
               'Date',
-              'N° reçu de caisse',
-              'N° bon de caisse',
-              'Compte tiers',
-              'Intitulé client',
+              principale ? 'N° reçu de caisse' : 'N° bon de caisse',
+              principale ? 'Intitulé client' : 'Bénéficiaire',
               'Libellé',
               'Recettes',
               'Dépenses',
@@ -2096,11 +2370,9 @@ class _ReleveCaissePageState extends State<ReleveCaissePage> {
               for (final l in rows)
                 [
                   l.date == null ? '' : _dateFormat.format(l.date!),
-                  l.recu,
-                  l.bon,
-                  l.compteTiers,
+                  principale ? l.recu : l.bon,
                   l.intitule,
-                  l.libelle,
+                  l.libelle.replaceAll('•', '-'),
                   _num(l.recette),
                   _num(l.depense),
                   formatCurrency(l.solde),
@@ -2109,27 +2381,25 @@ class _ReleveCaissePageState extends State<ReleveCaissePage> {
             headerStyle: pw.TextStyle(
               color: PdfColors.white,
               fontWeight: pw.FontWeight.bold,
-              fontSize: 8,
+              fontSize: 10.5,
             ),
             headerDecoration: const pw.BoxDecoration(color: headerColor),
-            cellStyle: const pw.TextStyle(fontSize: 7.5),
+            cellStyle: const pw.TextStyle(fontSize: 10),
             cellPadding: const pw.EdgeInsets.symmetric(
-              horizontal: 4,
-              vertical: 4,
+              horizontal: 5,
+              vertical: 6,
             ),
             columnWidths: {
-              0: const pw.FixedColumnWidth(46),
-              1: const pw.FlexColumnWidth(1),
-              2: const pw.FlexColumnWidth(1),
-              3: const pw.FlexColumnWidth(0.9),
-              4: const pw.FlexColumnWidth(1.5),
-              5: const pw.FlexColumnWidth(2.6),
-              6: const pw.FlexColumnWidth(1),
-              7: const pw.FlexColumnWidth(1),
-              8: const pw.FlexColumnWidth(1.1),
+              0: const pw.FixedColumnWidth(62),
+              1: const pw.FlexColumnWidth(1.1),
+              2: const pw.FlexColumnWidth(1.8),
+              3: const pw.FlexColumnWidth(2.8),
+              4: const pw.FlexColumnWidth(1.1),
+              5: const pw.FlexColumnWidth(1.1),
+              6: const pw.FlexColumnWidth(1.2),
             },
             cellAlignments: {
-              for (var i = 6; i < 9; i++) i: pw.Alignment.centerRight,
+              for (var i = 4; i < 7; i++) i: pw.Alignment.centerRight,
             },
             border: pw.TableBorder.all(color: PdfColors.grey700, width: 0.6),
           ),

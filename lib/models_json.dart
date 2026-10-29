@@ -791,6 +791,8 @@ CaisseMouvement caisseMouvementFromJson(Map<String, dynamic> json) =>
       bonId: _str(json['bonId']),
       receptionneLe: _str(json['receptionneLe']),
       receptionnePar: _str(json['receptionnePar']),
+      imputeLe: _str(json['imputeLe']),
+      imputePar: _str(json['imputePar']),
       observations: _str(json['observations']),
       auteur: _str(json['auteur']),
       dateSaisie: _str(json['dateSaisie']),

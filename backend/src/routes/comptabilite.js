@@ -300,8 +300,19 @@ async function buildEntries(client, du, au, categories) {
      WHERE date::date BETWEEN $1 AND $2 AND montant > 0`,
     [du, au],
   );
+  // Encaissements de la caisse pas encore imputés par la comptabilité.
+  const { rows: aImputer } = await client.query(
+    `SELECT dossier_id, operation_uid FROM caisse_mouvements
+     WHERE type = 'Encaissement' AND impute_le IS NULL`,
+  );
+  const nonImputes = new Set(aImputer.map((m) => `${m.dossier_id}:${m.operation_uid}`));
+  let enAttente = 0;
   for (const o of operations) {
     const d = byId.get(o.dossier_id);
+    if (o.type === 'clientPayment' && nonImputes.has(`${o.dossier_id}:${o.uid}`)) {
+      if (wanted.has('reglements')) enAttente += 1;
+      continue;
+    }
     const amount = round(o.montant);
     const source = `operation:${o.dossier_id}:${o.uid}`;
     const base = { date: o.jour, piece: d.num_dossier, source };
@@ -373,6 +384,10 @@ async function buildEntries(client, du, au, categories) {
         ],
       });
     }
+  }
+
+  if (enAttente > 0) {
+    ignored.push(`${enAttente} encaissement(s) de caisse pas encore imputé(s) par la comptabilité`);
   }
 
   // Frais et dépenses des dossiers.

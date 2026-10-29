@@ -1984,6 +1984,27 @@ void main() {
       expect(recu.statutReglement, statutCommencement);
       expect(dossier.soldeClient, 300000);
 
+      // Recherche du client : ses totaux apparaissent, et reviennent à zéro.
+      final totaux = find.byKey(const ValueKey('impayes-totaux'));
+      await tester.enterText(
+        find.byKey(const ValueKey('impayes-search')),
+        'Comptoir',
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: totaux,
+          matching: find.text('${formatCurrency(300000)} F'),
+        ),
+        findsOneWidget,
+      );
+      await tester.enterText(find.byKey(const ValueKey('impayes-search')), '');
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(of: totaux, matching: find.text('0 F')),
+        findsNWidgets(3),
+      );
+
       // Approvisionnement de la caisse des dépenses.
       await tester.tap(find.byKey(const ValueKey('caisse-appro')));
       await tester.pumpAndSettle();
@@ -2038,6 +2059,43 @@ void main() {
       expect(cloture.caisse, caissePrincipale);
       expect(cloture.solde, 150000);
       expect(find.byKey(const ValueKey('caisse-cloture')), findsNothing);
+
+      // L'administrateur déclôture une caisse clôturée par erreur.
+      await tester.tap(find.byKey(const ValueKey('caisse-decloture')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('caisse-decloture-confirm')));
+      await tester.pumpAndSettle();
+      expect(backend.caisseClotures, isEmpty);
+      expect(find.byKey(const ValueKey('caisse-cloture')), findsOneWidget);
+
+      // Le comptable impute l'encaissement pointé par la caissière.
+      await tester.ensureVisible(find.byTooltip('Recouvrement'));
+      await tester.tap(find.byTooltip('Recouvrement'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Règlement').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Saisie des Règlements Clients'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('reglement-soldes-grid')),
+          matching: find.text('Client Comptoir'),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('reglement-a-imputer')), findsOneWidget);
+      await tester.tap(find.byKey(ValueKey('imputer-${recu.id}')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('echeances-valider')));
+      await tester.pumpAndSettle();
+      expect(recu.estImpute, isTrue);
+      expect(dossier.operations.single.id, '${recu.id}-i1');
+      expect(find.byKey(const ValueKey('reglement-a-imputer')), findsNothing);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('total-solde'))).data,
+        formatCurrency(300000),
+      );
     },
   );
 }
