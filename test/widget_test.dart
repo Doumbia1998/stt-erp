@@ -1982,6 +1982,15 @@ void main() {
     expect(recu.statutReglement, statutCommencement);
     expect(dossier.soldeClient, 300000);
 
+    // Réglé 200 000, pas encore imputé par la comptabilité.
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('impayes-grid')),
+        matching: find.text(formatCurrency(200000)),
+      ),
+      findsNWidgets(2),
+    );
+
     // Recherche du client : ses totaux apparaissent, et reviennent à zéro.
     final totaux = find.byKey(const ValueKey('impayes-totaux'));
     await tester.enterText(

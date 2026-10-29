@@ -490,7 +490,46 @@ List<ErpGridColumn<TransitDossier>> _impayesColumns() => [
       );
     },
   ),
+  ErpGridColumn(
+    label: 'Imputé',
+    width: 130,
+    numeric: true,
+    value: (d) => formatCurrency(_montantImpute(d)),
+    sortValue: _montantImpute,
+    builder: (d) => Text(
+      formatCurrency(_montantImpute(d)),
+      style: const TextStyle(color: _caisseGreen, fontWeight: FontWeight.w600),
+    ),
+  ),
+  ErpGridColumn(
+    label: 'Non imputé',
+    width: 130,
+    numeric: true,
+    value: (d) => formatCurrency(_montantNonImpute(d)),
+    sortValue: _montantNonImpute,
+    builder: (d) => Text(
+      formatCurrency(_montantNonImpute(d)),
+      style: TextStyle(
+        color: _montantNonImpute(d) > 0 ? _caisseOrange : _gridMuted,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+  ),
 ];
+
+// Encaissements de la caisse sur ce dossier pas encore imputés par la
+// comptabilité ; le reste des règlements est imputé.
+double _montantNonImpute(TransitDossier d) => _caisseMouvements
+    .where(
+      (m) =>
+          m.type == CaisseMouvement.encaissement &&
+          !m.estImpute &&
+          m.dossierId == d.id,
+    )
+    .fold(0, (s, m) => s + m.montant);
+
+double _montantImpute(TransitDossier d) =>
+    d.totalReglementsClient - _montantNonImpute(d);
 
 // Factures clients validées, filtrées (non soldées par défaut) et recherchées.
 class _ImpayesPanel extends StatefulWidget {
@@ -2624,6 +2663,8 @@ Future<void> _printEtatImpayes(List<TransitDossier> rows, String filter) async {
             'Réglé',
             'Non réglé',
             'Statut',
+            'Imputé',
+            'Non imputé',
           ],
           [
             for (final d in rows)
@@ -2639,6 +2680,8 @@ Future<void> _printEtatImpayes(List<TransitDossier> rows, String filter) async {
                 formatCurrency(d.totalReglementsClient),
                 formatCurrency(math.max(0, d.soldeClient)),
                 _statutFactureClient(d),
+                formatCurrency(_montantImpute(d)),
+                formatCurrency(_montantNonImpute(d)),
               ],
             [
               '',
@@ -2652,9 +2695,11 @@ Future<void> _printEtatImpayes(List<TransitDossier> rows, String filter) async {
               formatCurrency(sum((d) => d.totalReglementsClient)),
               formatCurrency(sum((d) => math.max(0, d.soldeClient))),
               '',
+              formatCurrency(sum(_montantImpute)),
+              formatCurrency(sum(_montantNonImpute)),
             ],
           ],
-          numericColumns: {7, 8, 9},
+          numericColumns: {7, 8, 9, 11, 12},
           fontSize: 7.5,
         ),
       ],
