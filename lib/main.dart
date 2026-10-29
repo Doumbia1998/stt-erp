@@ -193,6 +193,77 @@ void _loadErpData(ErpData data) {
   _caisseParametres = data.caisseParametres ?? CaisseParametres();
 }
 
+// Recharge toutes les données depuis le serveur (saisies des autres utilisateurs).
+Future<bool> _actualiserDonnees(BuildContext context) async {
+  try {
+    _loadErpData(await erpBackend.reload());
+  } on ErpBackendException catch (error) {
+    if (context.mounted) {
+      await _showInfoAlert(
+        context,
+        title: 'Actualisation impossible',
+        message: error.message,
+      );
+    }
+    return false;
+  }
+  if (context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 2),
+        content: Text(
+          'Données actualisées à ${DateFormat('HH:mm').format(DateTime.now())}',
+        ),
+      ),
+    );
+  }
+  return true;
+}
+
+// Bouton « Actualiser » : icône qui tourne pendant le rechargement.
+class ErpRefreshButton extends StatefulWidget {
+  final Color color;
+  final VoidCallback? onRefreshed;
+
+  const ErpRefreshButton({
+    super.key,
+    this.color = Colors.white,
+    this.onRefreshed,
+  });
+
+  @override
+  State<ErpRefreshButton> createState() => _ErpRefreshButtonState();
+}
+
+class _ErpRefreshButtonState extends State<ErpRefreshButton> {
+  bool _busy = false;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    key: const ValueKey('erp-refresh'),
+    tooltip: 'Actualiser',
+    onPressed: _busy
+        ? null
+        : () async {
+            setState(() => _busy = true);
+            final ok = await _actualiserDonnees(context);
+            if (!mounted) return;
+            setState(() => _busy = false);
+            if (ok) widget.onRefreshed?.call();
+          },
+    icon: _busy
+        ? SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.4,
+              color: widget.color,
+            ),
+          )
+        : Icon(Icons.sync_rounded, color: widget.color),
+  );
+}
+
 // Rubriques masquées selon le rôle : chaque caissière ne voit que sa caisse.
 bool _menuVisible(ErpMenuItem item) => switch (_currentUser?.role) {
   roleCaissierPrincipal => item.title != 'Caisse Dépenses',
@@ -628,6 +699,8 @@ class MainNavigationPage extends StatefulWidget {
 
 class _MainNavigationPageState extends State<MainNavigationPage> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
+  // Incrémenté à chaque actualisation : les onglets ouverts sont reconstruits.
+  int _dataVersion = 0;
 
   static const List<ErpModule> _modules = [
     ErpModule('Gestion', Icons.space_dashboard_rounded, [
@@ -1144,6 +1217,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
               ),
             ),
           if (isCompact) const Spacer(),
+          ErpRefreshButton(onRefreshed: () => setState(() => _dataVersion++)),
           IconButton(
             tooltip: 'Alertes conteneurs',
             onPressed: () => agentOnly
@@ -1464,7 +1538,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                                 page.title == _selectedMenuTitle,
                             child: KeyedSubtree(
                               key: ValueKey(
-                                'workspace-${page.moduleIndex}-${page.title}',
+                                'workspace-${page.moduleIndex}-${page.title}-$_dataVersion',
                               ),
                               child: _buildPageFor(page),
                             ),

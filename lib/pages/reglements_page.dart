@@ -431,6 +431,7 @@ class _ReglementsTiersPageState extends State<ReglementsTiersPage> {
         backgroundColor: const Color(0xFF424247),
         foregroundColor: Colors.white,
         actions: [
+          ErpRefreshButton(onRefreshed: () => setState(() {})),
           if (tiers != null)
             TextButton.icon(
               style: TextButton.styleFrom(foregroundColor: Colors.white),

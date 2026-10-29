@@ -2140,6 +2140,41 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Saisie des Règlements Transporteurs').last);
     await tester.pumpAndSettle();
+    expect(find.text('TRANS 2'), findsNothing);
+
+    // Un autre utilisateur enregistre une facture : « Actualiser » la fait apparaître.
+    backend
+      ..prestataires.add(
+        Prestataire(
+          id: 'trans-2',
+          entreprise: 'TRANS 2',
+          type: 'Transporteur',
+          pays: 'Mali',
+          villePort: 'Bamako',
+          contact: '',
+          telephone: '',
+          email: '',
+          services: '',
+        ),
+      )
+      ..facturesTransporteur.add(
+        FactureTransporteur(
+          id: 'ftr-2',
+          reference: 'FAC-TRP-1026-0002',
+          transporteurId: 'trans-2',
+          dateEmission: '20/10/2026',
+          montant: 800000,
+        ),
+      );
+    await tester.tap(find.byKey(const ValueKey('erp-refresh')).first);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('reglement-soldes-grid')),
+        matching: find.text('TRANS 2'),
+      ),
+      findsOneWidget,
+    );
     await tester.tap(
       find.descendant(
         of: find.byKey(const ValueKey('reglement-soldes-grid')),
