@@ -1330,10 +1330,13 @@ void main() {
     expect(saved, hasLength(2));
     expect(saved.first.$2.date.startsWith('15/'), isTrue);
 
-    // Suppression d'une ligne saisie à la main.
-    await tester.tap(
-      find.byKey(ValueKey('journal-delete-${saved.first.$2.ligne}')),
+    // Suppression d'une ligne saisie à la main (colonne Actions, à droite).
+    final delete = find.byKey(
+      ValueKey('journal-delete-${saved.first.$2.ligne}'),
     );
+    await tester.ensureVisible(delete);
+    await tester.pumpAndSettle();
+    await tester.tap(delete);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('journal-delete-confirm')));
     await tester.pumpAndSettle();
