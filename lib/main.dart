@@ -28,6 +28,7 @@ part 'pages/dossiers_page.dart';
 part 'pages/facture_transitaire_page.dart';
 part 'pages/facture_transporteur_page.dart';
 part 'pages/frais_caisse_pages.dart';
+part 'pages/journal_saisie_page.dart';
 part 'pages/reglements_page.dart';
 part 'pages/transporteurs_page.dart';
 part 'pages/voyage_modules_page.dart';

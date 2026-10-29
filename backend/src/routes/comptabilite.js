@@ -1,8 +1,8 @@
 const express = require('express');
 const { withTransaction } = require('../db');
-const { badRequest } = require('../errors');
+const { badRequest, conflict, notFound } = require('../errors');
 const { requireModule } = require('../auth');
-const { frDateToSql, sqlDateToFr, list } = require('../format');
+const { frDateToSql, sqlDateToFr, list, text, amount } = require('../format');
 
 // Comptes par défaut (plan SYSCOHADA) quand un tiers n'a pas de compte propre.
 const COMPTES = {
@@ -104,7 +104,7 @@ async function buildEntries(client, du, au, categories) {
         libelle: `Facture ${f.reference} • ${d.client_nom}`,
         source: `facture:${f.id}`,
         lines: [
-          { compte: d.client_compte || COMPTES.clients, libelle: d.client_nom, debit: amount, credit: 0 },
+          { compte: d.client_compte || COMPTES.clients, libelle: d.client_nom, tiers: d.client_nom, debit: amount, credit: 0 },
           { compte: COMPTES.ventes, libelle: `Dossier ${d.num_dossier}`, debit: 0, credit: amount },
         ],
       });
@@ -119,7 +119,7 @@ async function buildEntries(client, du, au, categories) {
         source: `facture:${f.id}`,
         lines: [
           { compte: COMPTES.fraisTransit, libelle: `Dossier ${d.num_dossier}`, debit: amount, credit: 0 },
-          { compte: t.compte, libelle: t.nom, debit: 0, credit: amount },
+          { compte: t.compte, libelle: t.nom, tiers: t.nom, debit: 0, credit: amount },
         ],
       });
     } else if ((f.type === 'provider' || f.type === 'carrier') && wanted.has('achats')) {
@@ -133,7 +133,7 @@ async function buildEntries(client, du, au, categories) {
         source: `facture:${f.id}`,
         lines: [
           { compte: COMPTES.achats, libelle: `Dossier ${d.num_dossier}`, debit: amount, credit: 0 },
-          { compte: p.compte, libelle: p.nom, debit: 0, credit: amount },
+          { compte: p.compte, libelle: p.nom, tiers: p.nom, debit: 0, credit: amount },
         ],
       });
     }
@@ -178,7 +178,7 @@ async function buildEntries(client, du, au, categories) {
             ? [{ compte: COMPTES.fraisTransit, libelle: f.reference, debit: fees, credit: 0 }]
             : []),
           ...advanceLines,
-          { compte: f.compte_comptable || COMPTES.transitaires, libelle: nom, debit: 0, credit: amount },
+          { compte: f.compte_comptable || COMPTES.transitaires, libelle: nom, tiers: nom, debit: 0, credit: amount },
         ],
       });
     }
@@ -208,7 +208,7 @@ async function buildEntries(client, du, au, categories) {
         libelle: `Règlement ${nom} • ${r.reference}`,
         source: `reglement-transitaire:${r.facture_id}:${r.uid}`,
         lines: [
-          { compte: r.compte_comptable || COMPTES.transitaires, libelle: nom, debit: amount, credit: 0 },
+          { compte: r.compte_comptable || COMPTES.transitaires, libelle: nom, tiers: nom, debit: amount, credit: 0 },
           { compte: treasuryOf(r.code_journal), libelle: r.reference, debit: 0, credit: amount },
         ],
       });
@@ -237,7 +237,7 @@ async function buildEntries(client, du, au, categories) {
         source: `facture-transporteur:${f.id}`,
         lines: [
           { compte: COMPTES.transport, libelle: f.reference, debit: amount, credit: 0 },
-          { compte, libelle: nom, debit: 0, credit: amount },
+          { compte, libelle: nom, tiers: nom, debit: 0, credit: amount },
         ],
       });
     }
@@ -254,7 +254,7 @@ async function buildEntries(client, du, au, categories) {
           libelle: `Avance camion ${f.plaque || ''} • ${nom}`,
           source: `avance-transporteur:${f.id}`,
           lines: [
-            { compte, libelle: nom, debit: amount, credit: 0 },
+            { compte, libelle: nom, tiers: nom, debit: amount, credit: 0 },
             { compte: treasuryOf(f.journal_avance), libelle: f.reference, debit: 0, credit: amount },
           ],
         });
@@ -286,7 +286,7 @@ async function buildEntries(client, du, au, categories) {
         libelle: `Règlement ${nom} • ${r.reference}`,
         source: `reglement-transporteur:${r.facture_id}:${r.uid}`,
         lines: [
-          { compte: r.compte_comptable || COMPTES.fournisseurs, libelle: nom, debit: amount, credit: 0 },
+          { compte: r.compte_comptable || COMPTES.fournisseurs, libelle: nom, tiers: nom, debit: amount, credit: 0 },
           { compte: treasuryOf(r.code_journal), libelle: r.reference, debit: 0, credit: amount },
         ],
       });
@@ -328,7 +328,7 @@ async function buildEntries(client, du, au, categories) {
         libelle: `Règlement ${d.client_nom} • ${o.titre}`,
         lines: [
           { compte: treasuryOf(o.code_journal), libelle: o.titre, debit: amount, credit: 0 },
-          { compte: d.client_compte || COMPTES.clients, libelle: d.client_nom, debit: 0, credit: amount },
+          { compte: d.client_compte || COMPTES.clients, libelle: d.client_nom, tiers: d.client_nom, debit: 0, credit: amount },
         ],
       });
     } else if (o.type === 'providerPayment' && wanted.has('reglements')) {
@@ -343,7 +343,7 @@ async function buildEntries(client, du, au, categories) {
         categorie: 'reglements',
         libelle: `Règlement ${p.nom} • ${o.titre}`,
         lines: [
-          { compte: p.compte, libelle: p.nom, debit: amount, credit: 0 },
+          { compte: p.compte, libelle: p.nom, tiers: p.nom, debit: amount, credit: 0 },
           { compte: treasuryOf(o.code_journal), libelle: o.titre, debit: 0, credit: amount },
         ],
       });
@@ -356,7 +356,7 @@ async function buildEntries(client, du, au, categories) {
         categorie: 'avances',
         libelle: `Avance ${p.nom} • ${o.titre}`,
         lines: [
-          { compte: COMPTES.avancesFournisseurs, libelle: p.nom, debit: amount, credit: 0 },
+          { compte: COMPTES.avancesFournisseurs, libelle: p.nom, tiers: p.nom, debit: amount, credit: 0 },
           { compte: treasuryOf(journal), libelle: o.titre, debit: 0, credit: amount },
         ],
       });
@@ -367,7 +367,7 @@ async function buildEntries(client, du, au, categories) {
         categorie: 'ventes',
         libelle: `${o.titre} • ${d.client_nom}`,
         lines: [
-          { compte: d.client_compte || COMPTES.clients, libelle: d.client_nom, debit: amount, credit: 0 },
+          { compte: d.client_compte || COMPTES.clients, libelle: d.client_nom, tiers: d.client_nom, debit: amount, credit: 0 },
           { compte: COMPTES.ventes, libelle: o.titre, debit: 0, credit: amount },
         ],
       });
@@ -380,7 +380,7 @@ async function buildEntries(client, du, au, categories) {
         libelle: `${o.titre} • ${p.nom}`,
         lines: [
           { compte: COMPTES.achats, libelle: o.titre, debit: amount, credit: 0 },
-          { compte: p.compte, libelle: p.nom, debit: 0, credit: amount },
+          { compte: p.compte, libelle: p.nom, tiers: p.nom, debit: 0, credit: amount },
         ],
       });
     }
@@ -549,9 +549,9 @@ async function runUpdate(client, { du, au, categories }, user) {
     );
     for (const [position, line] of entry.lines.entries()) {
       await client.query(
-        `INSERT INTO ecriture_lignes (ecriture_id, position, compte, libelle, debit, credit)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [rows[0].id, position, line.compte, line.libelle, line.debit, line.credit],
+        `INSERT INTO ecriture_lignes (ecriture_id, position, compte, libelle, debit, credit, tiers)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [rows[0].id, position, line.compte, line.libelle, line.debit, line.credit, line.tiers ?? ''],
       );
     }
   }
@@ -574,6 +574,24 @@ async function runUpdate(client, { du, au, categories }, user) {
   );
   return { ecritures: entries.length, categories: summary, ignores: ignored };
 }
+
+const ligneJson = (r) => ({
+  ecriture: Number(r.id),
+  ligne: Number(r.ligne_id),
+  date: sqlDateToFr(r.date),
+  piece: r.piece,
+  libelle: r.libelle,
+  categorie: r.categorie,
+  origine: r.origine,
+  auteur: r.auteur,
+  numeroFacture: r.numero_facture,
+  reference: r.reference,
+  compte: r.compte,
+  tiers: r.tiers,
+  libelleLigne: r.ligne_libelle,
+  debit: r.debit,
+  credit: r.credit,
+});
 
 function comptabiliteRouter(pool) {
   const router = express.Router();
@@ -691,26 +709,106 @@ function comptabiliteRouter(pool) {
         throw badRequest('Journal et mois (AAAA-MM) obligatoires.');
       }
       const { rows } = await pool.query(
-        `SELECT e.id, e.date, e.piece, e.libelle, e.categorie,
-           l.position, l.compte, l.libelle AS ligne_libelle, l.debit, l.credit
+        `SELECT e.id, e.date, e.piece, e.libelle, e.categorie, e.origine, e.auteur,
+           e.numero_facture, e.reference,
+           l.id AS ligne_id, l.position, l.compte, l.libelle AS ligne_libelle, l.debit, l.credit,
+           l.tiers
          FROM ecritures e JOIN ecriture_lignes l ON l.ecriture_id = e.id
          WHERE e.journal_code = $1 AND to_char(e.date, 'YYYY-MM') = $2
          ORDER BY e.date, e.id, l.position`,
         [journal, month],
       );
-      res.json(
-        rows.map((r) => ({
-          ecriture: Number(r.id),
-          date: sqlDateToFr(r.date),
-          piece: r.piece,
-          libelle: r.libelle,
-          categorie: r.categorie,
-          compte: r.compte,
-          libelleLigne: r.ligne_libelle,
-          debit: r.debit,
-          credit: r.credit,
-        })),
-      );
+      res.json(rows.map(ligneJson));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Saisie manuelle : une ligne ajoutée à la pièce (journal, date, N° pièce).
+  router.post('/comptabilite/ecritures/lignes', async (req, res, next) => {
+    try {
+      const b = req.body ?? {};
+      const journal = text(b, 'journal', { required: true, max: 20 });
+      const date = frDateToSql(b.date, 'date');
+      if (!date) throw badRequest('La date de la ligne est obligatoire.');
+      const piece = text(b, 'piece', { required: true, max: 120 });
+      const compte = text(b, 'compte', { required: true, max: 30 });
+      const debit = amount(b, 'debit', { min: 0 });
+      const credit = amount(b, 'credit', { min: 0 });
+      if ((debit > 0) === (credit > 0)) {
+        throw badRequest('Saisissez un montant au débit ou au crédit (pas les deux).');
+      }
+      const libelle = text(b, 'libelle', { required: true, max: 500 });
+      const line = await withTransaction(pool, async (client) => {
+        const known = await client.query('SELECT 1 FROM journaux WHERE code = $1', [journal]);
+        if (known.rows.length === 0) throw badRequest('Journal inconnu.');
+        const account = await client.query('SELECT 1 FROM plan_comptable WHERE code = $1', [compte]);
+        if (account.rows.length === 0) throw badRequest(`Le compte ${compte} n'existe pas dans le plan comptable.`);
+        let { rows: [ecriture] } = await client.query(
+          `SELECT id FROM ecritures
+           WHERE origine = 'manuel' AND journal_code = $1 AND date = $2 AND piece = $3
+           ORDER BY id LIMIT 1`,
+          [journal, date, piece],
+        );
+        if (!ecriture) {
+          ({ rows: [ecriture] } = await client.query(
+            `INSERT INTO ecritures (journal_code, date, piece, libelle, origine, categorie,
+               numero_facture, reference, auteur)
+             VALUES ($1, $2, $3, $4, 'manuel', 'manuel', $5, $6, $7) RETURNING id`,
+            [journal, date, piece, libelle, text(b, 'numeroFacture', { max: 120 }),
+              text(b, 'reference', { max: 120 }), req.user.nom],
+          ));
+        }
+        const { rows: [{ last }] } = await client.query(
+          'SELECT COALESCE(max(position), -1)::int AS last FROM ecriture_lignes WHERE ecriture_id = $1',
+          [ecriture.id],
+        );
+        await client.query(
+          `INSERT INTO ecriture_lignes (ecriture_id, position, compte, libelle, debit, credit, tiers)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [ecriture.id, last + 1, compte, libelle, debit, credit, text(b, 'tiers', { max: 300 })],
+        );
+        const { rows } = await client.query(
+          `SELECT e.id, e.date, e.piece, e.libelle, e.categorie, e.origine, e.auteur,
+             e.numero_facture, e.reference,
+             l.id AS ligne_id, l.position, l.compte, l.libelle AS ligne_libelle, l.debit, l.credit,
+             l.tiers
+           FROM ecritures e JOIN ecriture_lignes l ON l.ecriture_id = e.id
+           WHERE e.id = $1 AND l.position = $2`,
+          [ecriture.id, last + 1],
+        );
+        return ligneJson(rows[0]);
+      });
+      res.json(line);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Seules les lignes saisies à la main se suppriment ici : les écritures
+  // générées viennent des documents de gestion (mise à jour comptable).
+  router.delete('/comptabilite/ecritures/lignes/:id', async (req, res, next) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) throw badRequest('Ligne invalide.');
+      await withTransaction(pool, async (client) => {
+        const { rows: [line] } = await client.query(
+          `SELECT l.ecriture_id, e.origine FROM ecriture_lignes l
+           JOIN ecritures e ON e.id = l.ecriture_id WHERE l.id = $1`,
+          [id],
+        );
+        if (!line) throw notFound('Ligne introuvable.');
+        if (line.origine !== 'manuel') {
+          throw conflict("Cette ligne vient de la mise à jour comptable : corrigez le document d'origine puis relancez la mise à jour.");
+        }
+        await client.query('DELETE FROM ecriture_lignes WHERE id = $1', [id]);
+        await client.query(
+          `DELETE FROM ecritures WHERE id = $1
+             AND NOT EXISTS (SELECT 1 FROM ecriture_lignes WHERE ecriture_id = $1)`,
+          [line.ecriture_id],
+        );
+      });
+      res.status(204).end();
     } catch (error) {
       next(error);
     }

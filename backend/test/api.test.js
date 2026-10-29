@@ -996,6 +996,40 @@ test('cash vouchers pay truck fees and administrative expenses', async () => {
   assert.ok(update.body.ignores.some((i) => i.includes('pas encore payé')));
 });
 
+test('the accountant enters journal lines by hand', async () => {
+  const line = (body) => call('POST', '/comptabilite/ecritures/lignes', {
+    journal: 'BQ',
+    date: '15/09/2026',
+    piece: 'DEP-001',
+    numeroFacture: 'FA-9',
+    reference: 'REF-1',
+    ...body,
+  });
+  assert.equal((await line({ compte: '999999', libelle: 'x', debit: 10 })).status, 400);
+  assert.equal((await line({ compte: '521001', libelle: 'x', debit: 10, credit: 10 })).status, 400);
+  const debit = await line({ compte: '411002', tiers: 'Client Test', libelle: 'Règlement client', credit: 5000 });
+  assert.equal(debit.status, 200);
+  assert.equal(debit.body.origine, 'manuel');
+  assert.equal(debit.body.tiers, 'Client Test');
+  assert.equal(debit.body.numeroFacture, 'FA-9');
+  const credit = await line({ compte: '521001', libelle: 'Règlement client', debit: 5000 });
+  assert.equal(credit.body.ecriture, debit.body.ecriture);
+
+  const lines = await call('GET', '/comptabilite/ecritures?journal=BQ&mois=2026-09');
+  assert.equal(lines.body.filter((l) => l.piece === 'DEP-001').length, 2);
+  // Une ligne générée par la mise à jour ne se supprime pas ici.
+  const generated = (await call('GET', '/comptabilite/ecritures?journal=BQ&mois=2026-10')).body.find(
+    (l) => l.origine === 'gestion',
+  );
+  if (generated) {
+    assert.equal((await call('DELETE', `/comptabilite/ecritures/lignes/${generated.ligne}`)).status, 409);
+  }
+  assert.equal((await call('DELETE', `/comptabilite/ecritures/lignes/${debit.body.ligne}`)).status, 204);
+  assert.equal((await call('DELETE', `/comptabilite/ecritures/lignes/${credit.body.ligne}`)).status, 204);
+  const after = await call('GET', '/comptabilite/ecritures?journal=BQ&mois=2026-09');
+  assert.equal(after.body.filter((l) => l.piece === 'DEP-001').length, 0);
+});
+
 test('the cash desks collect invoices, pay vouchers, transfer and close the day', async () => {
   const now = new Date().toISOString().slice(0, 10);
   const [y, m, d] = now.split('-');

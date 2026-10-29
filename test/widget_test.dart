@@ -1184,6 +1184,14 @@ void main() {
           type: 'Banque',
           compteTresorerie: '521000',
         ),
+      )
+      ..comptes.add(
+        PlanAccount(
+          id: 'pc-521',
+          code: '52100000',
+          libelle: 'Banque BIM',
+          nature: 'Banque',
+        ),
       );
 
     await tester.pumpWidget(const TransitTrackerApp());
@@ -1241,6 +1249,95 @@ void main() {
     expect(find.text('0 écriture(s) comptabilisée(s)'), findsOneWidget);
     await tester.tap(find.text('Compris'));
     await tester.pumpAndSettle();
+
+    // Saisie manuelle dans le journal BQ : une pièce débit / crédit.
+    final journalRow = find
+        .descendant(
+          of: find.byKey(const ValueKey('journals-grid')),
+          matching: find.textContaining('Banque BIM'),
+        )
+        .first;
+    await tester.tap(journalRow);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(journalRow);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('journal-add')), findsOneWidget);
+
+    Future<void> addLine(
+      int version, {
+      String debit = '',
+      String credit = '',
+    }) async {
+      await tester.enterText(
+        find.descendant(
+          of: find.byKey(ValueKey('journal-compte-$version')),
+          matching: find.byType(TextFormField),
+        ),
+        '5210',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(ListTile),
+              matching: find.text('52100000 Banque BIM'),
+            )
+            .last,
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('journal-debit')),
+        debit,
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('journal-credit')),
+        credit,
+      );
+      await tester.tap(find.byKey(const ValueKey('journal-add')));
+      await tester.pumpAndSettle();
+    }
+
+    await tester.enterText(find.byKey(const ValueKey('journal-jour')), '15');
+    await tester.enterText(
+      find.byKey(const ValueKey('journal-piece')),
+      'DEP-1',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('journal-libelle')),
+      'Dépôt espèces',
+    );
+    await addLine(0, debit: '1000');
+    final lines = find.byKey(const ValueKey('journal-lines-grid'));
+    expect(
+      find.descendant(of: lines, matching: find.text('DEP-1')),
+      findsOneWidget,
+    );
+    final balance = find.byKey(const ValueKey('journal-balance'));
+    expect(
+      find.descendant(of: balance, matching: find.textContaining('Écart')),
+      findsOneWidget,
+    );
+    await addLine(1, credit: '1000');
+    expect(
+      find.descendant(of: lines, matching: find.text('DEP-1')),
+      findsNWidgets(2),
+    );
+    expect(
+      find.descendant(of: balance, matching: find.text('Journal équilibré')),
+      findsOneWidget,
+    );
+    final saved = (erpBackend as MemoryErpBackend).lignesEcriture;
+    expect(saved, hasLength(2));
+    expect(saved.first.$2.date.startsWith('15/'), isTrue);
+
+    // Suppression d'une ligne saisie à la main.
+    await tester.tap(
+      find.byKey(ValueKey('journal-delete-${saved.first.$2.ligne}')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('journal-delete-confirm')));
+    await tester.pumpAndSettle();
+    expect(saved, hasLength(1));
   });
 
   testWidgets('Clients share the general account; fee types get sub-accounts', (

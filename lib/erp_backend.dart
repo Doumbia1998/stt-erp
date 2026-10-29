@@ -109,6 +109,8 @@ class BalanceLigne {
 // Ligne d'écriture comptable.
 class EcritureLigne {
   final int ecriture;
+  // Identifiant de la ligne (suppression d'une ligne saisie à la main).
+  final int ligne;
   final String date;
   final String piece;
   final String libelle;
@@ -116,9 +118,16 @@ class EcritureLigne {
   final String libelleLigne;
   final double debit;
   final double credit;
+  // « manuel » (saisie des journaux) ou « gestion » (mise à jour comptable).
+  final String origine;
+  final String auteur;
+  final String numeroFacture;
+  final String reference;
+  final String tiers;
 
   const EcritureLigne({
     required this.ecriture,
+    this.ligne = 0,
     required this.date,
     required this.piece,
     required this.libelle,
@@ -126,8 +135,32 @@ class EcritureLigne {
     required this.libelleLigne,
     required this.debit,
     required this.credit,
+    this.origine = 'gestion',
+    this.auteur = '',
+    this.numeroFacture = '',
+    this.reference = '',
+    this.tiers = '',
   });
+
+  bool get estManuelle => origine == 'manuel';
 }
+
+EcritureLigne _ecritureLigneFromJson(Map<String, dynamic> r) => EcritureLigne(
+  ecriture: (r['ecriture'] as num).toInt(),
+  ligne: (r['ligne'] as num?)?.toInt() ?? 0,
+  date: r['date'] as String? ?? '',
+  piece: r['piece'] as String? ?? '',
+  libelle: r['libelle'] as String? ?? '',
+  compte: r['compte'] as String? ?? '',
+  libelleLigne: r['libelleLigne'] as String? ?? '',
+  debit: (r['debit'] as num).toDouble(),
+  credit: (r['credit'] as num).toDouble(),
+  origine: r['origine'] as String? ?? 'gestion',
+  auteur: r['auteur'] as String? ?? '',
+  numeroFacture: r['numeroFacture'] as String? ?? '',
+  reference: r['reference'] as String? ?? '',
+  tiers: r['tiers'] as String? ?? '',
+);
 
 // Résultat d'une mise à jour comptable : nombre d'écritures et montant par catégorie.
 class MiseAJourResultat {
@@ -221,6 +254,20 @@ abstract class ErpBackend {
   });
   Future<JournauxSynthese> journauxComptables(int annee);
   Future<List<EcritureLigne>> ecritures(String journal, String mois);
+  // Saisie des journaux : ajoute une ligne à la pièce (journal, date, N° pièce).
+  Future<EcritureLigne> ajouterLigneEcriture({
+    required String journal,
+    required String date,
+    required String piece,
+    String numeroFacture = '',
+    String reference = '',
+    required String compte,
+    String tiers = '',
+    required String libelle,
+    double debit = 0,
+    double credit = 0,
+  });
+  Future<void> supprimerLigneEcriture(EcritureLigne ligne);
   Future<List<BalanceLigne>> balanceComptes({
     required String du,
     required String au,
@@ -804,18 +851,41 @@ class HttpErpBackend implements ErpBackend {
             as List;
     return [
       for (final r in rows.cast<Map<String, dynamic>>())
-        EcritureLigne(
-          ecriture: (r['ecriture'] as num).toInt(),
-          date: r['date'] as String? ?? '',
-          piece: r['piece'] as String? ?? '',
-          libelle: r['libelle'] as String? ?? '',
-          compte: r['compte'] as String? ?? '',
-          libelleLigne: r['libelleLigne'] as String? ?? '',
-          debit: (r['debit'] as num).toDouble(),
-          credit: (r['credit'] as num).toDouble(),
-        ),
+        _ecritureLigneFromJson(r),
     ];
   }
+
+  @override
+  Future<EcritureLigne> ajouterLigneEcriture({
+    required String journal,
+    required String date,
+    required String piece,
+    String numeroFacture = '',
+    String reference = '',
+    required String compte,
+    String tiers = '',
+    required String libelle,
+    double debit = 0,
+    double credit = 0,
+  }) async => _ecritureLigneFromJson(
+    await _send('POST', '/comptabilite/ecritures/lignes', {
+          'journal': journal,
+          'date': date,
+          'piece': piece,
+          'numeroFacture': numeroFacture,
+          'reference': reference,
+          'compte': compte,
+          'tiers': tiers,
+          'libelle': libelle,
+          'debit': debit,
+          'credit': credit,
+        })
+        as Map<String, dynamic>,
+  );
+
+  @override
+  Future<void> supprimerLigneEcriture(EcritureLigne ligne) =>
+      _send('DELETE', '/comptabilite/ecritures/lignes/${ligne.ligne}');
 
   @override
   Future<void> saveDossier(TransitDossier dossier) async {
@@ -1480,8 +1550,58 @@ class MemoryErpBackend implements ErpBackend {
       const JournauxSynthese([], '');
 
   @override
-  Future<List<EcritureLigne>> ecritures(String journal, String mois) async =>
-      const [];
+  Future<List<EcritureLigne>> ecritures(String journal, String mois) async => [
+    for (final l in lignesEcriture)
+      if (l.$1 == journal &&
+          l.$2.date.endsWith('/${mois.substring(5)}/${mois.substring(0, 4)}'))
+        l.$2,
+  ];
+
+  // Lignes saisies à la main (journal, ligne).
+  final List<(String, EcritureLigne)> lignesEcriture = [];
+
+  @override
+  Future<EcritureLigne> ajouterLigneEcriture({
+    required String journal,
+    required String date,
+    required String piece,
+    String numeroFacture = '',
+    String reference = '',
+    required String compte,
+    String tiers = '',
+    required String libelle,
+    double debit = 0,
+    double credit = 0,
+  }) async {
+    if ((debit > 0) == (credit > 0)) {
+      throw const ErpBackendException(
+        'Saisissez un montant au débit ou au crédit (pas les deux).',
+        status: 400,
+      );
+    }
+    final ligne = EcritureLigne(
+      ecriture: lignesEcriture.length + 1,
+      ligne: lignesEcriture.length + 1,
+      date: date,
+      piece: piece,
+      libelle: libelle,
+      compte: compte,
+      libelleLigne: libelle,
+      debit: debit,
+      credit: credit,
+      origine: 'manuel',
+      auteur: _user?.name ?? '',
+      numeroFacture: numeroFacture,
+      reference: reference,
+      tiers: tiers,
+    );
+    lignesEcriture.add((journal, ligne));
+    return ligne;
+  }
+
+  @override
+  Future<void> supprimerLigneEcriture(EcritureLigne ligne) async =>
+      lignesEcriture.removeWhere((l) => l.$2.ligne == ligne.ligne);
 
   @override
   Future<List<BalanceLigne>> balanceComptes({

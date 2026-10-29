@@ -1263,20 +1263,20 @@ class _SaisieJournauxPageState extends State<SaisieJournauxPage> {
     );
   }
 
+  // Un journal non ouvert peut aussi recevoir des lignes saisies à la main.
   Future<void> _openEntries(_JournalRow row) async {
-    if (!row.isOpen) {
-      await _showInfoAlert(
-        context,
-        title: 'Journal non ouvert',
-        message:
-            'Aucune écriture dans ${row.journal} pour ${row.libellePeriode}. Lancez la mise à jour comptable pour déverser la gestion.',
-      );
-      return;
-    }
-    await showDialog<void>(
-      context: context,
-      builder: (context) => _EcrituresDialog(row: row),
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JournalSaisiePage(
+          journal: row.journal,
+          intitule: row.intitule,
+          year: row.year,
+          month: row.month,
+        ),
+      ),
     );
+    if (mounted) await _load();
   }
 
   Future<void> _runUpdate() async {
@@ -1499,133 +1499,5 @@ class _MiseAJourComptableDialogState extends State<_MiseAJourComptableDialog> {
         message: error.message,
       );
     }
-  }
-}
-
-class _EcrituresDialog extends StatefulWidget {
-  final _JournalRow row;
-
-  const _EcrituresDialog({required this.row});
-
-  @override
-  State<_EcrituresDialog> createState() => _EcrituresDialogState();
-}
-
-class _EcrituresDialogState extends State<_EcrituresDialog> {
-  List<EcritureLigne>? _lines;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    erpBackend
-        .ecritures(widget.row.journal, widget.row.moisCle)
-        .then((lines) {
-          if (mounted) setState(() => _lines = lines);
-        })
-        .catchError((Object error) {
-          if (mounted) setState(() => _error = '$error');
-        });
-  }
-
-  static final _columns = <ErpGridColumn<(int, EcritureLigne)>>[
-    ErpGridColumn(
-      label: 'Date',
-      width: 105,
-      value: (e) => e.$2.date,
-      sortValue: (e) => _parseFrDate(e.$2.date) ?? DateTime(0),
-    ),
-    ErpGridColumn(label: 'Pièce', width: 160, value: (e) => e.$2.piece),
-    ErpGridColumn(label: 'Compte', width: 110, value: (e) => e.$2.compte),
-    ErpGridColumn(
-      label: 'Libellé',
-      width: 300,
-      value: (e) =>
-          e.$2.libelleLigne.isEmpty ? e.$2.libelle : e.$2.libelleLigne,
-    ),
-    ErpGridColumn(
-      label: 'Débit',
-      width: 130,
-      numeric: true,
-      value: (e) => _dash(e.$2.debit),
-      sortValue: (e) => e.$2.debit,
-    ),
-    ErpGridColumn(
-      label: 'Crédit',
-      width: 130,
-      numeric: true,
-      value: (e) => _dash(e.$2.credit),
-      sortValue: (e) => e.$2.credit,
-    ),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final screen = MediaQuery.sizeOf(context);
-    final lines = _lines ?? const [];
-    final debit = lines.fold<double>(0, (s, l) => s + l.debit);
-    final credit = lines.fold<double>(0, (s, l) => s + l.credit);
-    return Dialog(
-      insetPadding: const EdgeInsets.all(14),
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: SizedBox(
-        width: math.min(screen.width - 28, 1100),
-        height: math.min(screen.height - 28, 760),
-        child: Column(
-          children: [
-            _dialogHeader(
-              icon: Icons.menu_book_rounded,
-              title:
-                  'Journal ${widget.row.journal} • ${widget.row.libellePeriode}',
-              subtitle: widget.row.intitule,
-              onClose: () => Navigator.pop(context),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: _lines == null && _error == null
-                    ? const Center(child: CircularProgressIndicator())
-                    : ErpGrid<(int, EcritureLigne)>(
-                        columns: _columns,
-                        rows: [for (final (i, l) in lines.indexed) (i, l)],
-                        rowId: (e) => '${e.$1}',
-                        emptyText: _error ?? 'Aucune écriture.',
-                      ),
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-              color: const Color(0xFFF4F6FB),
-              child: Wrap(
-                spacing: 24,
-                runSpacing: 6,
-                children: [
-                  Text(
-                    'Total débit : ${formatCurrency(debit)}',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  Text(
-                    'Total crédit : ${formatCurrency(credit)}',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  Text(
-                    (debit - credit).abs() < 0.5
-                        ? 'Journal équilibré'
-                        : 'Écart : ${formatCurrency(debit - credit)}',
-                    style: TextStyle(
-                      color: (debit - credit).abs() < 0.5
-                          ? const Color(0xFF15803D)
-                          : const Color(0xFFDC2626),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
