@@ -93,7 +93,7 @@ test('login rejects wrong credentials and protects data routes', async () => {
   });
   assert.equal(ok.status, 200);
   assert.equal(ok.body.utilisateur.role, 'Administrateur');
-  assert.equal(ok.body.utilisateur.modules.length, 11);
+  assert.equal(ok.body.utilisateur.modules.length, 12);
   token = ok.body.jeton;
 });
 
@@ -987,13 +987,117 @@ test('cash vouchers pay truck fees and administrative expenses', async () => {
   assert.equal(data.body.bonsCaisse.length, 2);
   assert.equal(data.body.bonsCaisse[0].lignes[1].proprietaire, 'STT');
 
-  await call('POST', '/comptabilite/mise-a-jour', {
+  // Un bon n'est passé en comptabilité qu'une fois payé par la caisse des dépenses.
+  const update = await call('POST', '/comptabilite/mise-a-jour', {
     du: '01/10/2026',
     au: '31/10/2026',
     categories: ['depenses'],
   });
-  const piece = `BC-${String(bon.body.numero).padStart(5, '0')}`;
-  const bank = await call('GET', '/comptabilite/ecritures?journal=BQ&mois=2026-10');
-  assert.ok(bank.body.some((l) => l.piece === piece && l.credit === 12000));
-  assert.ok(bank.body.some((l) => l.piece === piece && l.compte === '65880001' && l.debit === 7000));
+  assert.ok(update.body.ignores.some((i) => i.includes('pas encore payé')));
+});
+
+test('the cash desks collect invoices, pay vouchers, transfer and close the day', async () => {
+  const now = new Date().toISOString().slice(0, 10);
+  const [y, m, d] = now.split('-');
+  const todayFr = `${d}/${m}/${y}`;
+  for (const [id, code] of [['acc-cp', '571001'], ['acc-cd', '571002']]) {
+    await call('PUT', `/comptes/${id}`, { code, libelle: `Caisse ${code}`, nature: 'Banque' });
+  }
+  for (const [code, compte] of [['CP', '571001'], ['CD', '571002']]) {
+    assert.equal(
+      (await call('PUT', `/journaux/${code}`, { code, intitule: `Caisse ${code}`, type: 'Caisse', compteTresorerie: compte })).status,
+      200,
+    );
+  }
+  const invoice = (kind, prefix, extra = {}) => ({ ...emptyInvoice('dc1', kind, prefix), id: `dc1-${kind}`, reference: `${prefix}-C1`, ...extra });
+  const dossier = await call('PUT', '/dossiers/dc1', dossierBody({
+    numDossier: 'STT-C1',
+    factures: {
+      client: invoice('client', 'FAC', { montant: 500000, statut: 'Clôturée', dateEmission: '20/10/2026' }),
+      provider: invoice('provider', 'FP'),
+      forwarder: invoice('forwarder', 'FT'),
+      carrier: invoice('carrier', 'FTR'),
+    },
+  }));
+  assert.equal(dossier.status, 200);
+
+  const encaisse = (id, body) => call('POST', '/caisse/encaissements', { id, dossierId: 'dc1', modePaiement: 'Espèces', ...body });
+  // Sans journal de caisse choisi par la Direction, rien n'est possible.
+  assert.equal((await encaisse('rc-0', { statut: 'Payé' })).status, 409);
+  assert.equal((await call('PUT', '/caisse/parametres', { principale: 'CP', depenses: 'CP' })).status, 400);
+  assert.equal((await call('PUT', '/caisse/parametres', { principale: 'CP', depenses: 'CD' })).status, 200);
+
+  // Commencement (paiement partiel), puis « Payé » qui solde la facture.
+  const first = await encaisse('rc-1', { statut: 'Commencement', montant: 200000 });
+  assert.equal(first.status, 200);
+  assert.ok(first.body.mouvement.recuNumero >= 1);
+  assert.equal(first.body.operation.type, 'clientPayment');
+  assert.equal(first.body.version, dossier.body.version + 1);
+  assert.equal((await encaisse('rc-x', { statut: 'Commencement', montant: 300000 })).status, 400);
+  const paid = await encaisse('rc-2', { statut: 'Payé' });
+  assert.equal(paid.body.mouvement.montant, 300000);
+  assert.equal(paid.body.mouvement.recuNumero, first.body.mouvement.recuNumero + 1);
+  assert.equal((await encaisse('rc-3', { statut: 'Payé' })).status, 409);
+
+  // La caisse des dépenses paie un bon par son numéro, après approvisionnement.
+  const payBon = () => call('POST', '/caisse/bons/bc-1/paiement', { id: 'pay-1' });
+  assert.equal((await payBon()).status, 409);
+  const appro = await call('POST', '/caisse/virements', { id: 'vir-1', type: 'Approvisionnement', montant: 50000 });
+  assert.equal(appro.status, 200);
+  assert.equal((await payBon()).status, 409); // pas encore réceptionné
+  assert.equal((await call('POST', '/caisse/virements/vir-1/reception')).status, 200);
+  assert.equal((await call('POST', '/caisse/virements/vir-1/reception')).status, 409);
+  const payment = await payBon();
+  assert.equal(payment.status, 200);
+  assert.equal(payment.body.codeJournal, 'CD');
+  assert.equal((await payBon()).status, 409);
+  assert.equal((await call('DELETE', '/bons-caisse/bc-1')).status, 409);
+
+  // Reversement du reliquat (50 000 - 12 000) à la caisse principale.
+  assert.equal((await call('POST', '/caisse/virements', { id: 'vir-2', type: 'Reversement', montant: 40000 })).status, 409);
+  assert.equal((await call('POST', '/caisse/virements', { id: 'vir-2', type: 'Reversement', montant: 38000 })).status, 200);
+  assert.equal((await call('POST', '/caisse/virements/vir-2/reception')).status, 200);
+
+  // La caissière des dépenses n'encaisse pas les clients.
+  await call('PUT', '/utilisateurs/u-cd', {
+    nom: 'Caissière Dépenses',
+    identifiant: 'caisse-dep',
+    role: 'Caissier Dépenses',
+    modules: ['Caisse'],
+    motDePasse: 'caisse-2026',
+  });
+  const login = await call('POST', '/auth/connexion', { identifiant: 'caisse-dep', motDePasse: 'caisse-2026' });
+  assert.equal(
+    (await call('POST', '/caisse/encaissements', { id: 'rc-9', dossierId: 'dc1', statut: 'Payé' }, login.body.jeton)).status,
+    403,
+  );
+
+  const data = await call('GET', '/donnees');
+  assert.deepEqual(data.body.caisse.parametres, { principale: 'CP', depenses: 'CD' });
+  assert.equal(data.body.caisse.mouvements.length, 5);
+  const dc1 = data.body.dossiers.find((x) => x.id === 'dc1');
+  assert.equal(dc1.operations.filter((o) => o.type === 'clientPayment').length, 2);
+
+  // Clôture du jour : plus d'annulation ni de mouvement dans la caisse principale.
+  const closing = await call('POST', '/caisse/clotures', { caisse: 'Principale' });
+  assert.equal(closing.status, 200);
+  assert.equal(closing.body.recettes, 538000);
+  assert.equal(closing.body.depenses, 50000);
+  assert.equal(closing.body.solde, 488000);
+  assert.equal((await call('POST', '/caisse/clotures', { caisse: 'Principale' })).status, 409);
+  assert.equal((await call('DELETE', '/caisse/mouvements/rc-1')).status, 409);
+
+  // Comptabilité : le bon payé passe dans le journal de la caisse des dépenses.
+  await call('POST', '/comptabilite/mise-a-jour', {
+    du: todayFr,
+    au: todayFr,
+    categories: ['depenses', 'reglements'],
+  });
+  const cd = await call('GET', `/comptabilite/ecritures?journal=CD&mois=${y}-${m}`);
+  const piece = `BC-${String(data.body.bonsCaisse.find((b) => b.id === 'bc-1').numero).padStart(5, '0')}`;
+  assert.ok(cd.body.some((l) => l.piece === piece && l.compte === '571002' && l.credit === 12000));
+  assert.ok(cd.body.some((l) => l.piece === piece && l.compte === '65880001' && l.debit === 7000));
+  const cp = await call('GET', `/comptabilite/ecritures?journal=CP&mois=${y}-${m}`);
+  assert.ok(cp.body.some((l) => l.piece === 'APPRO' && l.compte === '571002' && l.debit === 50000));
+  assert.ok(cp.body.some((l) => l.compte === '571001' && l.debit === 300000));
 });

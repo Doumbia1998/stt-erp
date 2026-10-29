@@ -1864,4 +1864,180 @@ void main() {
     await tester.pumpAndSettle();
     expect(selected?.id, 'provider-dakar');
   });
+
+  testWidgets(
+    'Cash desks: collect an invoice, pay a voucher and close the day',
+    (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1400, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final backend = erpBackend as MemoryErpBackend;
+      final client = Client(
+        id: 'client-k',
+        nom: 'Client Comptoir',
+        telephone: '',
+        compteComptable: '41100009',
+      );
+      final dossier = TransitDossier(
+        id: 'dossier-k',
+        numDossier: 'STT-K1',
+        numBL: 'BL-K1',
+        numLB: '',
+        client: client,
+        nbConteneurs: 0,
+        dateDebut: '09/10/2026',
+        typeMarchandise: 'Riz',
+      );
+      dossier.factureClient
+        ..reference = 'FAC-K1'
+        ..statut = 'Clôturée'
+        ..montant = 500000
+        ..dateEmission = '20/10/2026';
+      backend
+        ..clients.add(client)
+        ..dossiers.add(dossier)
+        ..journaux.addAll([
+          JournalCode(
+            code: 'CA',
+            intitule: 'Caisse principale',
+            type: 'Caisse',
+            compteTresorerie: '57110001',
+          ),
+          JournalCode(
+            code: 'CD',
+            intitule: 'Caisse dépenses',
+            type: 'Caisse',
+            compteTresorerie: '57110002',
+          ),
+        ])
+        ..caisseParametres.principale = 'CA'
+        ..caisseParametres.depenses = 'CD'
+        ..bonsCaisse.add(
+          BonCaisse(
+            id: 'bon-k',
+            numero: 1,
+            categorie: BonCaisse.depenseAdministrative,
+            date: '20/10/2026',
+            beneficiaire: 'DG',
+            motif: 'Mission Kayes',
+            lignes: [
+              BonCaisseLigne(
+                libelle: 'Mission',
+                compte: '63800000',
+                montant: 10000,
+              ),
+            ],
+          ),
+        );
+
+      await tester.pumpWidget(const TransitTrackerApp());
+      await tester.enterText(find.byType(TextField).at(0), 'admin');
+      await tester.enterText(find.byType(TextField).at(1), '1234');
+      await tester.tap(find.text('SE CONNECTER'));
+      await tester.pumpAndSettle();
+
+      Future<void> open(String item) async {
+        await tester.ensureVisible(find.byTooltip('Caisse'));
+        await tester.tap(find.byTooltip('Caisse'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(item).last);
+        await tester.pumpAndSettle();
+      }
+
+      // Caisse principale : la facture non soldée, pointée en « Commencement ».
+      await open('Caisse Encaissement');
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('impayes-grid')),
+          matching: find.text('FAC-K1'),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('encaisser')));
+      await tester.pumpAndSettle();
+      // « Non payé » par défaut : rien ne peut être validé.
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.byKey(const ValueKey('encaissement-save')),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(find.byKey(const ValueKey('encaissement-statut')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Commencement (paiement partiel)').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('encaissement-amount')),
+        '200000',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('encaissement-save')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Fermer').last);
+      await tester.pumpAndSettle();
+      final recu = backend.caisseMouvements.single;
+      expect(recu.recu, 'RC-00001');
+      expect(recu.statutReglement, statutCommencement);
+      expect(dossier.soldeClient, 300000);
+
+      // Approvisionnement de la caisse des dépenses.
+      await tester.tap(find.byKey(const ValueKey('caisse-appro')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('virement-amount')),
+        '50000',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('virement-save')));
+      await tester.pumpAndSettle();
+
+      // Caisse des dépenses : réception, puis paiement du bon par son numéro.
+      await open('Caisse Dépenses');
+      await tester.tap(find.byKey(const ValueKey('caisse-reception-depenses')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Réceptionner').last);
+      await tester.pumpAndSettle();
+      expect(soldeCaisse(caisseDepenses, backend.caisseMouvements), 50000);
+      await tester.enterText(
+        find.byKey(const ValueKey('bon-search')),
+        'BC-00001',
+      );
+      await tester.tap(find.byKey(const ValueKey('bon-search-go')));
+      await tester.pumpAndSettle();
+      expect(find.text('Mission Kayes', findRichText: true), findsWidgets);
+      await tester.tap(find.byKey(const ValueKey('bon-pay')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('bon-pay-confirm')));
+      await tester.pumpAndSettle();
+      expect(
+        backend.caisseMouvements.where((m) => m.bonId == 'bon-k'),
+        hasLength(1),
+      );
+      expect(soldeCaisse(caisseDepenses, backend.caisseMouvements), 40000);
+
+      // Relevé de caisse principale du jour, puis clôture.
+      await open('Relevé de Caisse');
+      final releve = find.byKey(const ValueKey('releve-grid'));
+      expect(
+        find.descendant(of: releve, matching: find.text('RC-00001')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: releve, matching: find.text('TOTAUX DE CAISSE')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('caisse-cloture')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('caisse-cloture-confirm')));
+      await tester.pumpAndSettle();
+      final cloture = backend.caisseClotures.single;
+      expect(cloture.caisse, caissePrincipale);
+      expect(cloture.solde, 150000);
+      expect(find.byKey(const ValueKey('caisse-cloture')), findsNothing);
+    },
+  );
 }

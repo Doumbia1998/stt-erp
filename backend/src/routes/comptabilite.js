@@ -409,16 +409,28 @@ async function buildEntries(client, du, au, categories) {
     }
   }
 
-  // Bons de caisse : frais des camions et dépenses administratives.
+  // Bons de caisse : frais des camions et dépenses administratives, passés en
+  // comptabilité à leur paiement par la caisse des dépenses.
   if (wanted.has('depenses')) {
     const { rows: bons } = await client.query(
-      `SELECT b.id, b.numero, b.categorie, b.date, b.code_journal, b.beneficiaire, b.motif,
+      `SELECT b.id, b.numero, b.categorie, m.date, b.code_journal, b.beneficiaire, b.motif,
          l.position, l.compte, l.libelle, l.plaque, l.montant
-       FROM bons_caisse b JOIN bon_caisse_lignes l ON l.bon_id = b.id
-       WHERE b.date BETWEEN $1 AND $2
+       FROM bons_caisse b
+       JOIN caisse_mouvements m ON m.bon_id = b.id
+       JOIN bon_caisse_lignes l ON l.bon_id = b.id
+       WHERE m.date BETWEEN $1 AND $2
        ORDER BY b.numero, l.position`,
       [du, au],
     );
+    const { rows: [unpaid] } = await client.query(
+      `SELECT count(*)::int AS n FROM bons_caisse b
+       WHERE b.date BETWEEN $1 AND $2
+         AND NOT EXISTS (SELECT 1 FROM caisse_mouvements m WHERE m.bon_id = b.id)`,
+      [du, au],
+    );
+    if (unpaid.n > 0) {
+      ignored.push(`${unpaid.n} bon(s) de caisse pas encore payé(s) par la caisse des dépenses`);
+    }
     const byBon = new Map();
     for (const row of bons) {
       if (!byBon.has(row.id)) byBon.set(row.id, []);
@@ -447,6 +459,45 @@ async function buildEntries(client, du, au, categories) {
             credit: 0,
           })),
           { compte: treasuryOf(bon.code_journal), libelle: piece, debit: 0, credit: total },
+        ],
+      });
+    }
+  }
+
+  // Virements entre la caisse principale et la caisse des dépenses (réceptionnés).
+  if (wanted.has('reglements')) {
+    const { rows: caisses } = await client.query('SELECT code, journal_code FROM caisses');
+    const journalOf = new Map(caisses.map((c) => [c.code, c.journal_code]));
+    const { rows: virements } = await client.query(
+      `SELECT id, type, date, montant FROM caisse_mouvements
+       WHERE type IN ('Approvisionnement', 'Reversement') AND receptionne_le IS NOT NULL
+         AND date BETWEEN $1 AND $2`,
+      [du, au],
+    );
+    for (const v of virements) {
+      const [from, to] = v.type === 'Approvisionnement'
+        ? ['Principale', 'Dépenses']
+        : ['Dépenses', 'Principale'];
+      const source = journalOf.get(from);
+      const destination = journalOf.get(to);
+      if (!source || !destination) {
+        ignored.push(`${v.type} de caisse sans journal de caisse`);
+        continue;
+      }
+      const amount = round(v.montant);
+      const libelle = v.type === 'Approvisionnement'
+        ? 'Approvisionnement caisse des dépenses'
+        : 'Reversement à la caisse principale';
+      push({
+        journal: source,
+        categorie: 'reglements',
+        date: v.date,
+        piece: v.type === 'Approvisionnement' ? 'APPRO' : 'REVERS',
+        libelle,
+        source: `virement-caisse:${v.id}`,
+        lines: [
+          { compte: treasuryOf(destination), libelle, debit: amount, credit: 0 },
+          { compte: treasuryOf(source), libelle, debit: 0, credit: amount },
         ],
       });
     }

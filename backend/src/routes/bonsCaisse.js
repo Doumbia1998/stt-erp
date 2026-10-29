@@ -103,9 +103,18 @@ function parseBon(b) {
   };
 }
 
+// Un bon payé par la caisse des dépenses ne peut plus être modifié ni supprimé.
+async function refuserSiPaye(db, id) {
+  const { rows } = await db.query('SELECT 1 FROM caisse_mouvements WHERE bon_id = $1', [id]);
+  if (rows.length > 0) {
+    throw conflict('Ce bon de caisse est déjà payé par la caisse : il ne peut plus être modifié ni supprimé.');
+  }
+}
+
 async function saveBon(client, id, bon, user) {
   const { rows } = await client.query('SELECT version FROM bons_caisse WHERE id = $1 FOR UPDATE', [id]);
   const existing = rows[0];
+  if (existing) await refuserSiPaye(client, id);
   if (existing && existing.version !== bon.version) {
     throw conflict('Ce bon de caisse a été modifié par un autre utilisateur. Rechargez la page.');
   }
@@ -176,6 +185,7 @@ function bonsCaisseRouter(pool) {
   router.delete('/bons-caisse/:id', requireModule(...MODULES), async (req, res, next) => {
     try {
       const id = text(req.params, 'id', { required: true, max: 120 });
+      await refuserSiPaye(pool, id);
       const { rowCount } = await pool.query('DELETE FROM bons_caisse WHERE id = $1', [id]);
       if (rowCount === 0) throw notFound('Bon de caisse introuvable.');
       res.status(204).end();

@@ -37,6 +37,9 @@ class ErpData {
   final List<AgentVoyage> agentsVoyage;
   final List<FactureAgent> facturesAgent;
   final List<BonCaisse> bonsCaisse;
+  final List<CaisseMouvement> caisseMouvements;
+  final List<CaisseCloture> caisseClotures;
+  final CaisseParametres? caisseParametres;
 
   const ErpData({
     required this.user,
@@ -55,6 +58,9 @@ class ErpData {
     this.agentsVoyage = const [],
     this.facturesAgent = const [],
     this.bonsCaisse = const [],
+    this.caisseMouvements = const [],
+    this.caisseClotures = const [],
+    this.caisseParametres,
   });
 }
 
@@ -173,6 +179,31 @@ abstract class ErpBackend {
   // Bons de caisse (frais des camions, dépenses administratives).
   Future<void> saveBonCaisse(BonCaisse bon);
   Future<void> deleteBonCaisse(BonCaisse bon);
+
+  // Caisse : journaux des caisses (Direction), encaissements des clients,
+  // paiement des bons, virements entre caisses et clôture du jour.
+  Future<void> saveCaisseParametres(CaisseParametres parametres);
+  // Ajoute le règlement client au dossier et renvoie le reçu de caisse.
+  Future<CaisseMouvement> encaisser({
+    required TransitDossier dossier,
+    required String statut,
+    required double montant,
+    String modePaiement = '',
+    String observations = '',
+  });
+  Future<CaisseMouvement> payerBonCaisse(BonCaisse bon);
+  Future<CaisseMouvement> virementCaisse({
+    required String type,
+    required double montant,
+    String observations = '',
+  });
+  Future<void> receptionnerVirement(CaisseMouvement virement);
+  // Retire aussi le règlement client du dossier pour un encaissement.
+  Future<void> annulerMouvementCaisse(
+    CaisseMouvement mouvement, {
+    TransitDossier? dossier,
+  });
+  Future<CaisseCloture> cloturerCaisse(String caisse);
 
   // Comptabilité générée depuis la gestion.
   Future<MiseAJourResultat> miseAJourComptable({
@@ -303,6 +334,19 @@ class HttpErpBackend implements ErpBackend {
           .cast<Map<String, dynamic>>()
           .map(bonCaisseFromJson)
           .toList(),
+      caisseMouvements:
+          (((json['caisse'] as Map?)?['mouvements'] as List?) ?? const [])
+              .cast<Map<String, dynamic>>()
+              .map(caisseMouvementFromJson)
+              .toList(),
+      caisseClotures:
+          (((json['caisse'] as Map?)?['clotures'] as List?) ?? const [])
+              .cast<Map<String, dynamic>>()
+              .map(caisseClotureFromJson)
+              .toList(),
+      caisseParametres: caisseParametresFromJson(
+        (json['caisse'] as Map?)?['parametres'] as Map<String, dynamic>?,
+      ),
       dossiers: [
         for (final dossier in rows('dossiers'))
           dossierFromJson(
@@ -502,6 +546,107 @@ class HttpErpBackend implements ErpBackend {
   Future<void> deleteBonCaisse(BonCaisse bon) =>
       _send('DELETE', '/bons-caisse/${_segment(bon.id)}');
 
+  @override
+  Future<void> saveCaisseParametres(CaisseParametres parametres) => _send(
+    'PUT',
+    '/caisse/parametres',
+    {'principale': parametres.principale, 'depenses': parametres.depenses},
+  );
+
+  @override
+  Future<CaisseMouvement> encaisser({
+    required TransitDossier dossier,
+    required String statut,
+    required double montant,
+    String modePaiement = '',
+    String observations = '',
+  }) async {
+    final result =
+        await _send('POST', '/caisse/encaissements', {
+              'id': newLocalId('rc'),
+              'dossierId': dossier.id,
+              'statut': statut,
+              'montant': montant,
+              'modePaiement': modePaiement,
+              'observations': observations,
+            })
+            as Map<String, dynamic>;
+    dossier
+      ..operations.add(
+        dossierOperationFromJson(result['operation'] as Map<String, dynamic>),
+      )
+      ..version = (result['version'] as num).toInt();
+    return caisseMouvementFromJson(result['mouvement'] as Map<String, dynamic>);
+  }
+
+  @override
+  Future<CaisseMouvement> payerBonCaisse(BonCaisse bon) async {
+    final result =
+        await _send('POST', '/caisse/bons/${_segment(bon.id)}/paiement', {
+              'id': newLocalId('pb'),
+            })
+            as Map<String, dynamic>;
+    bon
+      ..version = (result['version'] as num).toInt()
+      ..codeJournal = result['codeJournal'] as String? ?? bon.codeJournal;
+    return caisseMouvementFromJson(result['mouvement'] as Map<String, dynamic>);
+  }
+
+  @override
+  Future<CaisseMouvement> virementCaisse({
+    required String type,
+    required double montant,
+    String observations = '',
+  }) async {
+    final result =
+        await _send('POST', '/caisse/virements', {
+              'id': newLocalId('vir'),
+              'type': type,
+              'montant': montant,
+              'observations': observations,
+            })
+            as Map<String, dynamic>;
+    return caisseMouvementFromJson(result['mouvement'] as Map<String, dynamic>);
+  }
+
+  @override
+  Future<void> receptionnerVirement(CaisseMouvement virement) async {
+    final result =
+        await _send(
+              'POST',
+              '/caisse/virements/${_segment(virement.id)}/reception',
+            )
+            as Map<String, dynamic>;
+    final saved = caisseMouvementFromJson(
+      result['mouvement'] as Map<String, dynamic>,
+    );
+    virement
+      ..receptionneLe = saved.receptionneLe
+      ..receptionnePar = saved.receptionnePar;
+  }
+
+  @override
+  Future<void> annulerMouvementCaisse(
+    CaisseMouvement mouvement, {
+    TransitDossier? dossier,
+  }) async {
+    final result =
+        await _send('DELETE', '/caisse/mouvements/${_segment(mouvement.id)}')
+            as Map<String, dynamic>;
+    if (dossier != null && result['version'] != null) {
+      dossier
+        ..operations.removeWhere((o) => o.id == mouvement.operationUid)
+        ..version = (result['version'] as num).toInt();
+    }
+  }
+
+  @override
+  Future<CaisseCloture> cloturerCaisse(String caisse) async =>
+      caisseClotureFromJson(
+        await _send('POST', '/caisse/clotures', {'caisse': caisse})
+            as Map<String, dynamic>,
+      );
+
   static double _numOf(Object? value, double fallback) =>
       (value as num?)?.toDouble() ?? fallback;
 
@@ -647,6 +792,9 @@ class MemoryErpBackend implements ErpBackend {
   final List<AgentVoyage> agentsVoyage = [];
   final List<FactureAgent> facturesAgent = [];
   final List<BonCaisse> bonsCaisse = [];
+  final List<CaisseMouvement> caisseMouvements = [];
+  final List<CaisseCloture> caisseClotures = [];
+  final CaisseParametres caisseParametres = CaisseParametres();
   final Map<String, String> photosT1 = {};
   final Map<String, String> _passwords = {};
 
@@ -670,6 +818,7 @@ class MemoryErpBackend implements ErpBackend {
             'Bureau DD',
             'Enquête',
             'Dépenses & Frais',
+            'Caisse',
           },
         ),
       ] {
@@ -721,6 +870,12 @@ class MemoryErpBackend implements ErpBackend {
       agentsVoyage: [...agentsVoyage],
       facturesAgent: [...facturesAgent],
       bonsCaisse: [...bonsCaisse],
+      caisseMouvements: [...caisseMouvements],
+      caisseClotures: [...caisseClotures],
+      caisseParametres: CaisseParametres(
+        principale: caisseParametres.principale,
+        depenses: caisseParametres.depenses,
+      ),
     );
   }
 
@@ -980,8 +1135,214 @@ class MemoryErpBackend implements ErpBackend {
   }
 
   @override
-  Future<void> deleteBonCaisse(BonCaisse bon) async =>
-      bonsCaisse.removeWhere((b) => b.id == bon.id);
+  Future<void> deleteBonCaisse(BonCaisse bon) async {
+    if (caisseMouvements.any((m) => m.bonId == bon.id)) {
+      throw const ErpBackendException(
+        'Ce bon de caisse est déjà payé par la caisse : il ne peut plus être modifié ni supprimé.',
+        status: 409,
+      );
+    }
+    bonsCaisse.removeWhere((b) => b.id == bon.id);
+  }
+
+  static String get _todayFr => DateFormat('dd/MM/yyyy').format(DateTime.now());
+
+  void _verifierCaisse(String caisse) {
+    if (caisseParametres.journalDe(caisse).isEmpty) {
+      throw ErpBackendException(
+        'Aucun journal n’est choisi pour la caisse ${caisse.toLowerCase()} : la Direction doit le définir dans « Paramètres des caisses ».',
+        status: 409,
+      );
+    }
+    if (caisseClotures.any((c) => c.caisse == caisse && c.date == _todayFr)) {
+      throw ErpBackendException(
+        'La caisse ${caisse.toLowerCase()} est clôturée aujourd’hui.',
+        status: 409,
+      );
+    }
+  }
+
+  CaisseMouvement _mouvement(
+    String type,
+    double montant, {
+    int recuNumero = 0,
+    String dossierId = '',
+    String operationUid = '',
+    String statut = '',
+    String modePaiement = '',
+    String bonId = '',
+    String observations = '',
+  }) {
+    final m = CaisseMouvement(
+      id: newLocalId('cm'),
+      type: type,
+      date: _todayFr,
+      montant: montant,
+      recuNumero: recuNumero,
+      dossierId: dossierId,
+      operationUid: operationUid,
+      statutReglement: statut,
+      modePaiement: modePaiement,
+      bonId: bonId,
+      observations: observations,
+      auteur: _user?.name ?? '',
+    );
+    caisseMouvements.add(m);
+    return m;
+  }
+
+  @override
+  Future<void> saveCaisseParametres(CaisseParametres parametres) async {
+    caisseParametres
+      ..principale = parametres.principale
+      ..depenses = parametres.depenses;
+  }
+
+  @override
+  Future<CaisseMouvement> encaisser({
+    required TransitDossier dossier,
+    required String statut,
+    required double montant,
+    String modePaiement = '',
+    String observations = '',
+  }) async {
+    _verifierCaisse(caissePrincipale);
+    final reste = dossier.soldeClient;
+    if (!dossier.estFacture || reste <= 0) {
+      throw const ErpBackendException('Facture non validée ou déjà soldée.');
+    }
+    final amount = statut == statutPaye ? reste : montant;
+    if (amount <= 0 ||
+        amount > reste ||
+        (statut == statutCommencement && amount >= reste)) {
+      throw const ErpBackendException('Montant invalide.', status: 400);
+    }
+    final numero =
+        caisseMouvements.fold(0, (m, c) => math.max(m, c.recuNumero)) + 1;
+    final recu = 'RC-${numero.toString().padLeft(5, '0')}';
+    final operation = DossierOperation(
+      type: DossierOperationType.clientPayment,
+      titre: 'Reçu de caisse $recu',
+      categorie: 'Règlement Client',
+      montant: amount,
+      date: DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now()),
+      codeJournal: caisseParametres.principale,
+      modePaiement: modePaiement,
+      observations: '$statut • facture ${dossier.factureClient.reference}',
+      auteur: _user?.name ?? '',
+    );
+    dossier
+      ..operations.add(operation)
+      ..version += 1;
+    return _mouvement(
+      CaisseMouvement.encaissement,
+      amount,
+      recuNumero: numero,
+      dossierId: dossier.id,
+      operationUid: operation.id,
+      statut: statut,
+      modePaiement: modePaiement,
+      observations: observations,
+    );
+  }
+
+  @override
+  Future<CaisseMouvement> payerBonCaisse(BonCaisse bon) async {
+    _verifierCaisse(caisseDepenses);
+    if (caisseMouvements.any((m) => m.bonId == bon.id)) {
+      throw ErpBackendException('Le bon ${bon.reference} est déjà payé.');
+    }
+    if (bon.montant > soldeCaisse(caisseDepenses, caisseMouvements)) {
+      throw const ErpBackendException(
+        'Solde insuffisant dans la caisse des dépenses.',
+        status: 409,
+      );
+    }
+    bon
+      ..codeJournal = caisseParametres.depenses
+      ..version += 1;
+    return _mouvement(CaisseMouvement.paiementBon, bon.montant, bonId: bon.id);
+  }
+
+  @override
+  Future<CaisseMouvement> virementCaisse({
+    required String type,
+    required double montant,
+    String observations = '',
+  }) async {
+    final source = type == CaisseMouvement.approvisionnement
+        ? caissePrincipale
+        : caisseDepenses;
+    _verifierCaisse(
+      caissePrincipale == source ? caisseDepenses : caissePrincipale,
+    );
+    _verifierCaisse(source);
+    if (montant <= 0 || montant > soldeCaisse(source, caisseMouvements)) {
+      throw ErpBackendException(
+        'Solde insuffisant dans la caisse ${source.toLowerCase()}.',
+        status: 409,
+      );
+    }
+    return _mouvement(type, montant, observations: observations);
+  }
+
+  @override
+  Future<void> receptionnerVirement(CaisseMouvement virement) async {
+    _verifierCaisse(virement.caisseDestination);
+    virement
+      ..receptionneLe = _todayFr
+      ..receptionnePar = _user?.name ?? '';
+  }
+
+  @override
+  Future<void> annulerMouvementCaisse(
+    CaisseMouvement mouvement, {
+    TransitDossier? dossier,
+  }) async {
+    final caisse = switch (mouvement.type) {
+      CaisseMouvement.encaissement => caissePrincipale,
+      CaisseMouvement.paiementBon => caisseDepenses,
+      _ => mouvement.caisseSource,
+    };
+    if (mouvement.estReceptionne ||
+        caisseClotures.any(
+          (c) => c.caisse == caisse && c.date == mouvement.date,
+        )) {
+      throw const ErpBackendException(
+        'Ce mouvement ne peut plus être annulé.',
+        status: 409,
+      );
+    }
+    caisseMouvements.removeWhere((m) => m.id == mouvement.id);
+    if (dossier != null) {
+      dossier
+        ..operations.removeWhere((o) => o.id == mouvement.operationUid)
+        ..version += 1;
+    }
+  }
+
+  @override
+  Future<CaisseCloture> cloturerCaisse(String caisse) async {
+    final today = _todayFr;
+    if (caisseClotures.any((c) => c.caisse == caisse && c.date == today)) {
+      throw const ErpBackendException(
+        'Caisse déjà clôturée aujourd’hui.',
+        status: 409,
+      );
+    }
+    final events = evenementsCaisse(caisse, caisseMouvements);
+    final duJour = events.where((e) => e.date == today);
+    final cloture = CaisseCloture(
+      caisse: caisse,
+      date: today,
+      recettes: duJour.fold(0, (s, e) => s + e.recette),
+      depenses: duJour.fold(0, (s, e) => s + e.depense),
+      solde: soldeCaisse(caisse, caisseMouvements),
+      auteur: _user?.name ?? '',
+    );
+    caisseClotures.add(cloture);
+    return cloture;
+  }
 
   @override
   Future<void> deleteFactureAgent(FactureAgent facture) async {

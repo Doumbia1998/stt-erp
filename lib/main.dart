@@ -20,6 +20,7 @@ export 'erp_backend.dart' show ErpBackend, MemoryErpBackend, erpBackend;
 export 'models.dart';
 
 part 'pages/balance_comptes_page.dart';
+part 'pages/caisse_page.dart';
 part 'pages/comptabilite_pages.dart';
 part 'pages/dossier_dialogs.dart';
 part 'pages/depenses_frais_page.dart';
@@ -131,6 +132,9 @@ final List<AffectationVoyage> _affectationsVoyage = [];
 final List<AgentVoyage> _agentsVoyage = [];
 final List<FactureAgent> _facturesAgent = [];
 final List<BonCaisse> _bonsCaisse = [];
+final List<CaisseMouvement> _caisseMouvements = [];
+final List<CaisseCloture> _caisseClotures = [];
+CaisseParametres _caisseParametres = CaisseParametres();
 
 void _loadErpData(ErpData data) {
   _currentUser = data.user;
@@ -179,7 +183,21 @@ void _loadErpData(ErpData data) {
   _bonsCaisse
     ..clear()
     ..addAll(data.bonsCaisse);
+  _caisseMouvements
+    ..clear()
+    ..addAll(data.caisseMouvements);
+  _caisseClotures
+    ..clear()
+    ..addAll(data.caisseClotures);
+  _caisseParametres = data.caisseParametres ?? CaisseParametres();
 }
+
+// Rubriques masquées selon le rôle : chaque caissière ne voit que sa caisse.
+bool _menuVisible(ErpMenuItem item) => switch (_currentUser?.role) {
+  roleCaissierPrincipal => item.title != 'Caisse Dépenses',
+  roleCaissierDepenses => item.title != 'Caisse Encaissement',
+  _ => true,
+};
 
 class TransitTrackerApp extends StatelessWidget {
   const TransitTrackerApp({super.key});
@@ -600,6 +618,7 @@ class MainNavigationPage extends StatefulWidget {
       'Bureau DD',
       'Enquête',
       'Dépenses & Frais',
+      'Caisse',
     },
   });
   @override
@@ -666,6 +685,11 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       ),
       ErpMenuItem('Types de frais', Icons.category_rounded),
     ]),
+    ErpModule('Caisse', Icons.point_of_sale_rounded, [
+      ErpMenuItem('Caisse Encaissement', Icons.savings_rounded),
+      ErpMenuItem('Caisse Dépenses', Icons.payments_rounded),
+      ErpMenuItem('Relevé de Caisse', Icons.receipt_long_rounded),
+    ]),
     ErpModule('Comptabilité', Icons.account_balance_rounded, [
       ErpMenuItem('Balance des Comptes', Icons.balance_rounded),
       ErpMenuItem('Balance Agées', Icons.pending_actions_rounded),
@@ -701,7 +725,10 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
     final visibleIndexes = _visibleModuleIndexes;
     if (visibleIndexes.isEmpty) return;
     _selectedModuleIndex = visibleIndexes.first;
-    _selectedMenuTitle = _modules[_selectedModuleIndex].items.first.title;
+    _selectedMenuTitle = _modules[_selectedModuleIndex].items
+        .where(_menuVisible)
+        .first
+        .title;
     _openPages
       ..clear()
       ..add((moduleIndex: _selectedModuleIndex, title: _selectedMenuTitle));
@@ -963,6 +990,14 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           moduleNames: _modules.map((module) => module.title).toList(),
           currentUserRole: widget.userRole,
         );
+      case 'Etat des Impayés':
+        return EtatImpayesPage();
+      case 'Caisse Encaissement':
+        return CaisseEncaissementPage();
+      case 'Caisse Dépenses':
+        return CaisseDepensesPage();
+      case 'Relevé de Caisse':
+        return ReleveCaissePage();
       case 'Control des Caisses':
         return CashControlPage(dossiers: _dossiers, journals: _journalCodes);
       case 'Règlement':
@@ -1049,6 +1084,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                       tooltip: module.title,
                       onSelected: (item) => _selectMenu(index, item),
                       itemBuilder: (context) => module.items
+                          .where(_menuVisible)
                           .map(
                             (item) => PopupMenuItem<ErpMenuItem>(
                               value: item,
@@ -1316,6 +1352,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                       ),
                     ),
                     children: module.items
+                        .where(_menuVisible)
                         .map(
                           (item) => ListTile(
                             contentPadding: const EdgeInsets.only(
@@ -1654,6 +1691,8 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
     'Agent Frontière',
     'Agent Bureau DD',
     'Agent Enquête',
+    roleCaissierPrincipal,
+    roleCaissierDepenses,
   ];
 
   // Inclut un rôle enregistré qui ne serait plus dans la liste.
@@ -1686,7 +1725,10 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
       case 'Recouvreur':
         return {'Recouvrement'};
       case 'Comptable':
-        return {'Comptabilité', 'Recouvrement', 'Dépenses & Frais'};
+        return {'Comptabilité', 'Recouvrement', 'Dépenses & Frais', 'Caisse'};
+      case roleCaissierPrincipal:
+      case roleCaissierDepenses:
+        return {'Caisse'};
       case 'Prestataire':
         return {'Prestation'};
       case 'Transporteur':

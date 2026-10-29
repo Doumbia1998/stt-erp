@@ -293,22 +293,7 @@ TransitDossier dossierFromJson(
       ],
       operations: [
         for (final operation in json['operations'] as List? ?? const [])
-          DossierOperation(
-            id: operation['id'] as String?,
-            type: DossierOperationType.values.byName(
-              operation['type'] as String,
-            ),
-            titre: _str(operation['titre']),
-            categorie: _str(operation['categorie']),
-            montant: _num(operation['montant']),
-            date: _str(operation['date']),
-            codeJournal: _str(operation['codeJournal']),
-            modePaiement: _str(operation['modePaiement']),
-            numeroCheque: _str(operation['numeroCheque']),
-            observations: _str(operation['observations']),
-            auteur: _str(operation['auteur']),
-            saisiLe: _str(operation['saisiLe']),
-          ),
+          dossierOperationFromJson(operation as Map<String, dynamic>),
       ],
       version: (json['version'] as num?)?.toInt() ?? 0,
       numero: (json['numero'] as num?)?.toInt() ?? 0,
@@ -775,3 +760,53 @@ Map<String, dynamic> bonCaisseToJson(BonCaisse b) => {
       },
   ],
 };
+
+DossierOperation dossierOperationFromJson(Map<String, dynamic> operation) =>
+    DossierOperation(
+      id: operation['id'] as String?,
+      type: DossierOperationType.values.byName(operation['type'] as String),
+      titre: _str(operation['titre']),
+      categorie: _str(operation['categorie']),
+      montant: _num(operation['montant']),
+      date: _str(operation['date']),
+      codeJournal: _str(operation['codeJournal']),
+      modePaiement: _str(operation['modePaiement']),
+      numeroCheque: _str(operation['numeroCheque']),
+      observations: _str(operation['observations']),
+      auteur: _str(operation['auteur']),
+      saisiLe: _str(operation['saisiLe']),
+    );
+
+CaisseMouvement caisseMouvementFromJson(Map<String, dynamic> json) =>
+    CaisseMouvement(
+      id: json['id'] as String,
+      type: _str(json['type']),
+      date: _str(json['date']),
+      montant: _num(json['montant']),
+      recuNumero: (json['recuNumero'] as num?)?.toInt() ?? 0,
+      dossierId: _str(json['dossierId']),
+      operationUid: _str(json['operationUid']),
+      statutReglement: _str(json['statutReglement']),
+      modePaiement: _str(json['modePaiement']),
+      bonId: _str(json['bonId']),
+      receptionneLe: _str(json['receptionneLe']),
+      receptionnePar: _str(json['receptionnePar']),
+      observations: _str(json['observations']),
+      auteur: _str(json['auteur']),
+      dateSaisie: _str(json['dateSaisie']),
+    );
+
+CaisseCloture caisseClotureFromJson(Map<String, dynamic> json) => CaisseCloture(
+  caisse: _str(json['caisse']),
+  date: _str(json['date']),
+  recettes: _num(json['recettes']),
+  depenses: _num(json['depenses']),
+  solde: _num(json['solde']),
+  auteur: _str(json['auteur']),
+);
+
+CaisseParametres caisseParametresFromJson(Map<String, dynamic>? json) =>
+    CaisseParametres(
+      principale: _str(json?['principale']),
+      depenses: _str(json?['depenses']),
+    );

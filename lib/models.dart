@@ -964,3 +964,137 @@ class BonCaisse {
   int get nbCamions =>
       lignes.map((l) => l.plaque).where((p) => p.isNotEmpty).toSet().length;
 }
+
+// --- CAISSE : caisse principale (encaissements des clients) et caisse des
+// dépenses (paiement des bons de caisse) ---
+
+const caissePrincipale = 'Principale';
+const caisseDepenses = 'Dépenses';
+const roleCaissierPrincipal = 'Caissier Principal';
+const roleCaissierDepenses = 'Caissier Dépenses';
+
+// Pointage d'un encaissement : facture soldée ou paiement partiel.
+const statutPaye = 'Payé';
+const statutCommencement = 'Commencement';
+
+class CaisseMouvement {
+  final String id;
+  // Encaissement, Paiement bon, Approvisionnement ou Reversement.
+  final String type;
+  final String date;
+  final double montant;
+  final int recuNumero;
+  final String dossierId;
+  final String operationUid;
+  final String statutReglement;
+  final String modePaiement;
+  final String bonId;
+  // Virement : date et auteur de la réception par la caisse de destination.
+  String receptionneLe;
+  String receptionnePar;
+  final String observations;
+  final String auteur;
+  final String dateSaisie;
+
+  static const encaissement = 'Encaissement';
+  static const paiementBon = 'Paiement bon';
+  static const approvisionnement = 'Approvisionnement';
+  static const reversement = 'Reversement';
+
+  CaisseMouvement({
+    required this.id,
+    required this.type,
+    required this.date,
+    required this.montant,
+    this.recuNumero = 0,
+    this.dossierId = '',
+    this.operationUid = '',
+    this.statutReglement = '',
+    this.modePaiement = '',
+    this.bonId = '',
+    this.receptionneLe = '',
+    this.receptionnePar = '',
+    this.observations = '',
+    this.auteur = '',
+    this.dateSaisie = '',
+  });
+
+  String get recu =>
+      recuNumero == 0 ? '' : 'RC-${recuNumero.toString().padLeft(5, '0')}';
+  bool get estVirement => type == approvisionnement || type == reversement;
+  bool get estReceptionne => receptionneLe.isNotEmpty;
+  // Caisse d'où sort l'argent d'un virement, et caisse qui le reçoit.
+  String get caisseSource =>
+      type == approvisionnement ? caissePrincipale : caisseDepenses;
+  String get caisseDestination =>
+      type == approvisionnement ? caisseDepenses : caissePrincipale;
+}
+
+class CaisseCloture {
+  final String caisse;
+  final String date;
+  final double recettes;
+  final double depenses;
+  final double solde;
+  final String auteur;
+
+  const CaisseCloture({
+    required this.caisse,
+    required this.date,
+    this.recettes = 0,
+    this.depenses = 0,
+    this.solde = 0,
+    this.auteur = '',
+  });
+}
+
+// Journal comptable de chaque caisse.
+class CaisseParametres {
+  String principale;
+  String depenses;
+
+  CaisseParametres({this.principale = '', this.depenses = ''});
+
+  String journalDe(String caisse) =>
+      caisse == caissePrincipale ? principale : depenses;
+}
+
+// Recette ou dépense d'une caisse : un virement sort de la caisse d'origine à
+// sa date et n'entre dans l'autre caisse qu'à sa réception.
+class CaisseEvenement {
+  final CaisseMouvement mouvement;
+  final String date;
+  final double recette;
+  final double depense;
+
+  const CaisseEvenement(this.mouvement, this.date, this.recette, this.depense);
+}
+
+List<CaisseEvenement> evenementsCaisse(
+  String caisse,
+  Iterable<CaisseMouvement> mouvements,
+) {
+  final events = <CaisseEvenement>[];
+  for (final m in mouvements) {
+    final principale = caisse == caissePrincipale;
+    switch (m.type) {
+      case CaisseMouvement.encaissement when principale:
+        events.add(CaisseEvenement(m, m.date, m.montant, 0));
+      case CaisseMouvement.paiementBon when !principale:
+        events.add(CaisseEvenement(m, m.date, 0, m.montant));
+      case CaisseMouvement.approvisionnement || CaisseMouvement.reversement:
+        if (m.caisseSource == caisse) {
+          events.add(CaisseEvenement(m, m.date, 0, m.montant));
+        } else if (m.estReceptionne) {
+          events.add(CaisseEvenement(m, m.receptionneLe, m.montant, 0));
+        }
+    }
+  }
+  return events;
+}
+
+double soldeCaisse(String caisse, Iterable<CaisseMouvement> mouvements) =>
+    evenementsCaisse(
+      caisse,
+      mouvements,
+    ).fold(0, (s, e) => s + e.recette - e.depense);
