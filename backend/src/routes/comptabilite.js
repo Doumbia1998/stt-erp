@@ -485,7 +485,7 @@ async function buildEntries(client, du, au, categories) {
     const journalOf = new Map(caisses.map((c) => [c.code, c.journal_code]));
     const { rows: virements } = await client.query(
       `SELECT id, type, date, montant FROM caisse_mouvements
-       WHERE type IN ('Approvisionnement', 'Reversement') AND receptionne_le IS NOT NULL
+       WHERE (type = 'Reversement' OR (type = 'Approvisionnement' AND receptionne_le IS NOT NULL))
          AND date BETWEEN $1 AND $2`,
       [du, au],
     );

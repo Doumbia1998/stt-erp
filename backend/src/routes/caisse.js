@@ -73,8 +73,9 @@ async function loadCaisse(db) {
   };
 }
 
-// Recettes et dépenses d'une caisse : un virement sort de la caisse d'origine à
-// sa date et n'entre dans l'autre caisse qu'à sa réception.
+// Recettes et dépenses d'une caisse : l'approvisionnement n'entre dans la caisse
+// des dépenses qu'à sa réception ; le reversement entre directement dans la
+// caisse principale.
 function evenements(caisse, mouvements) {
   const events = [];
   for (const m of mouvements) {
@@ -83,7 +84,7 @@ function evenements(caisse, mouvements) {
     if (caisse === PRINCIPALE) {
       if (m.type === 'Encaissement') events.push({ date: m.date, recette: montant, depense: 0 });
       if (m.type === 'Approvisionnement') events.push({ date: m.date, recette: 0, depense: montant });
-      if (m.type === 'Reversement' && recu) events.push({ date: recu, recette: montant, depense: 0 });
+      if (m.type === 'Reversement') events.push({ date: m.date, recette: montant, depense: 0 });
     } else {
       if (m.type === 'Paiement bon') events.push({ date: m.date, recette: 0, depense: montant });
       if (m.type === 'Reversement') events.push({ date: m.date, recette: 0, depense: montant });
@@ -279,6 +280,8 @@ async function virement(client, body, user) {
   await journalDe(client, DEPENSES);
   const date = today();
   await verifierOuverte(client, source, date);
+  // Le reversement est reçu tout de suite : la caisse principale doit être ouverte.
+  if (type === 'Reversement') await verifierOuverte(client, PRINCIPALE, date);
   const solde = await soldeCaisse(client, source);
   if (montant > solde) {
     throw conflict(`Solde insuffisant dans la caisse ${source.toLowerCase()} (${solde}).`);
@@ -294,7 +297,7 @@ async function virement(client, body, user) {
 async function receptionner(client, id, user) {
   await verrouiller(client);
   const { rows: [m] } = await client.query('SELECT * FROM caisse_mouvements WHERE id = $1 FOR UPDATE', [id]);
-  if (!m || !VIREMENTS.includes(m.type)) throw notFound('Virement introuvable.');
+  if (!m || m.type !== 'Approvisionnement') throw notFound('Approvisionnement introuvable.');
   if (m.receptionne_le) throw conflict('Ce virement est déjà réceptionné.');
   const destination = m.type === 'Approvisionnement' ? DEPENSES : PRINCIPALE;
   exiger(destination === PRINCIPALE ? peutPrincipale(user) : peutDepenses(user), destination);
@@ -328,6 +331,7 @@ async function annuler(client, id, user) {
       throw conflict('Ce virement est déjà réceptionné : il ne peut plus être annulé.');
     }
     await verifierOuverte(client, m.type === 'Approvisionnement' ? PRINCIPALE : DEPENSES, m.date);
+    if (m.type === 'Reversement') await verifierOuverte(client, PRINCIPALE, m.date);
   }
   await client.query('DELETE FROM caisse_mouvements WHERE id = $1', [id]);
   let version = null;

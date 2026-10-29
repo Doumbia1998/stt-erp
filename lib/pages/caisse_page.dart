@@ -29,12 +29,13 @@ CaisseMouvement? _paiementDuBon(BonCaisse bon) =>
 TransitDossier? _dossierById(String id) =>
     _dossiers.where((d) => d.id == id).firstOrNull;
 
-// Virements envoyés à cette caisse et pas encore réceptionnés.
+// Approvisionnements envoyés à cette caisse et pas encore réceptionnés (le
+// reversement entre directement dans la caisse principale).
 List<CaisseMouvement> _virementsAReceptionner(String caisse) =>
     _caisseMouvements
         .where(
           (m) =>
-              m.estVirement &&
+              m.type == CaisseMouvement.approvisionnement &&
               !m.estReceptionne &&
               m.caisseDestination == caisse,
         )
@@ -328,9 +329,11 @@ Future<CaisseMouvement?> _faireVirement(
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'L’autre caisse devra réceptionner le virement pour qu’il entre dans son solde.',
-                  style: TextStyle(color: _gridMuted, fontSize: 12),
+                Text(
+                  type == CaisseMouvement.approvisionnement
+                      ? 'La caisse des dépenses devra réceptionner l’approvisionnement pour qu’il entre dans son solde.'
+                      : 'Le reliquat entre directement dans la caisse principale.',
+                  style: const TextStyle(color: _gridMuted, fontSize: 12),
                 ),
               ],
             ),

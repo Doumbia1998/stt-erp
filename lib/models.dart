@@ -1065,8 +1065,9 @@ class CaisseParametres {
       caisse == caissePrincipale ? principale : depenses;
 }
 
-// Recette ou dépense d'une caisse : un virement sort de la caisse d'origine à
-// sa date et n'entre dans l'autre caisse qu'à sa réception.
+// Recette ou dépense d'une caisse : l'approvisionnement n'entre dans la caisse
+// des dépenses qu'à sa réception ; le reversement entre directement dans la
+// caisse principale.
 class CaisseEvenement {
   final CaisseMouvement mouvement;
   final String date;
@@ -1091,6 +1092,8 @@ List<CaisseEvenement> evenementsCaisse(
       case CaisseMouvement.approvisionnement || CaisseMouvement.reversement:
         if (m.caisseSource == caisse) {
           events.add(CaisseEvenement(m, m.date, 0, m.montant));
+        } else if (m.type == CaisseMouvement.reversement) {
+          events.add(CaisseEvenement(m, m.date, m.montant, 0));
         } else if (m.estReceptionne) {
           events.add(CaisseEvenement(m, m.receptionneLe, m.montant, 0));
         }

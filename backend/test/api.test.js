@@ -1056,7 +1056,8 @@ test('the cash desks collect invoices, pay vouchers, transfer and close the day'
   // Reversement du reliquat (50 000 - 12 000) à la caisse principale.
   assert.equal((await call('POST', '/caisse/virements', { id: 'vir-2', type: 'Reversement', montant: 40000 })).status, 409);
   assert.equal((await call('POST', '/caisse/virements', { id: 'vir-2', type: 'Reversement', montant: 38000 })).status, 200);
-  assert.equal((await call('POST', '/caisse/virements/vir-2/reception')).status, 200);
+  // Le reversement entre directement dans la caisse principale (pas de réception).
+  assert.equal((await call('POST', '/caisse/virements/vir-2/reception')).status, 404);
 
   // La caissière des dépenses n'encaisse pas les clients.
   await call('PUT', '/utilisateurs/u-cd', {
