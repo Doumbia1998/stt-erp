@@ -1184,8 +1184,9 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                             ),
                           )
                           .toList(),
+                      // Police et espacements réduits : tous les modules tiennent en largeur.
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        padding: const EdgeInsets.symmetric(horizontal: 5),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -1195,7 +1196,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                                 color: selected
                                     ? Colors.white
                                     : Colors.white.withValues(alpha: 0.88),
-                                fontSize: 16,
+                                fontSize: 13.5,
                                 fontWeight: selected
                                     ? FontWeight.bold
                                     : FontWeight.w500,
@@ -1204,7 +1205,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                             const Icon(
                               Icons.arrow_drop_down,
                               color: Colors.white,
-                              size: 21,
+                              size: 16,
                             ),
                           ],
                         ),
