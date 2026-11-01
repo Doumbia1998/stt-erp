@@ -125,8 +125,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Tableau de bord'), findsOneWidget);
-    expect(find.text('Dépenses par catégorie'), findsOneWidget);
-    expect(find.text('Modules de gestion'), findsOneWidget);
+    expect(find.text('Chiffre d’affaires'), findsOneWidget);
+    expect(find.text('Facturation et encaissements'), findsOneWidget);
+    expect(find.text('Encours clients'), findsOneWidget);
+    expect(find.text('Accès rapide'), findsOneWidget);
+    await tester.tap(find.text('Année'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('cette année'), findsWidgets);
     await tester.tap(find.byTooltip('Alertes conteneurs'));
     await tester.pumpAndSettle();
     expect(find.text('Suivi des conteneurs'), findsOneWidget);
