@@ -2262,10 +2262,13 @@ void main() {
     await tester.enterText(find.byType(TextField).at(1), '1234');
     await tester.tap(find.text('SE CONNECTER'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byTooltip('Recouvrement'));
-    await tester.tap(find.byTooltip('Recouvrement'));
+    // Les règlements transporteurs sont dans Comptabilité > Règlement.
+    await tester.ensureVisible(find.byTooltip('Comptabilité'));
+    await tester.tap(find.byTooltip('Comptabilité'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Saisie des Règlements Transporteurs').last);
+    await tester.tap(find.text('Règlement').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Saisie des Règlements Transporteurs'));
     await tester.pumpAndSettle();
     expect(find.text('TRANS 2'), findsNothing);
 
@@ -2293,7 +2296,7 @@ void main() {
           montant: 800000,
         ),
       );
-    await tester.tap(find.byKey(const ValueKey('erp-refresh')).first);
+    await tester.tap(find.byKey(const ValueKey('erp-refresh')).last);
     await tester.pumpAndSettle();
     expect(
       find.descendant(

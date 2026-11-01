@@ -722,10 +722,6 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
     ErpModule('Recouvrement', Icons.price_check_rounded, [
       ErpMenuItem('Etat des Impayés', Icons.receipt_long_rounded),
       ErpMenuItem('Relance des Impayés', Icons.notifications_active_rounded),
-      ErpMenuItem(
-        'Saisie des Règlements Transporteurs',
-        Icons.local_shipping_rounded,
-      ),
     ]),
     ErpModule('Dossier', Icons.folder_copy_rounded, [
       ErpMenuItem('Dossiers', Icons.folder_copy_rounded),
@@ -1079,11 +1075,6 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
         return CashControlPage(dossiers: _dossiers, journals: _journalCodes);
       case 'Règlement':
         return SettlementHubPage(dossiers: _dossiers, journals: _journalCodes);
-      case 'Saisie des Règlements Transporteurs':
-        return ReglementsTiersPage(
-          kind: SettlementKind.carrier,
-          embedded: true,
-        );
       case 'Historique':
         return HistoryPage(dossiers: _dossiers);
       default:
