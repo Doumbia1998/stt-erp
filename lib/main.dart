@@ -1200,37 +1200,20 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                                 ),
                               )
                               .toList(),
-                          // Espacements réduits entre les modules (police inchangée).
+                          // Nom du module seul (sans flèche), espacement régulier.
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  module.title,
-                                  style: TextStyle(
-                                    color: selected
-                                        ? Colors.white
-                                        : Colors.white.withValues(alpha: 0.88),
-                                    fontSize: 16,
-                                    fontWeight: selected
-                                        ? FontWeight.bold
-                                        : FontWeight.w500,
-                                  ),
-                                ),
-                                // Flèche à sa taille d'origine, sans la marge vide autour.
-                                const SizedBox(
-                                  width: 15,
-                                  child: OverflowBox(
-                                    maxWidth: 21,
-                                    child: Icon(
-                                      Icons.arrow_drop_down,
-                                      color: Colors.white,
-                                      size: 21,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                            padding: const EdgeInsets.symmetric(horizontal: 7),
+                            child: Text(
+                              module.title,
+                              style: TextStyle(
+                                color: selected
+                                    ? Colors.white
+                                    : Colors.white.withValues(alpha: 0.88),
+                                fontSize: 15,
+                                fontWeight: selected
+                                    ? FontWeight.bold
+                                    : FontWeight.w500,
+                              ),
                             ),
                           ),
                         );
