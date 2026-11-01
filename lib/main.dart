@@ -684,7 +684,7 @@ class MainNavigationPage extends StatefulWidget {
     this.authorizedModules = const {
       'Gestion',
       'Prestataire & Client',
-      'Prestation',
+      'Factures',
       'Recouvrement',
       'Dossier',
       'Transport',
@@ -706,6 +706,13 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   // Incrémenté à chaque actualisation : les onglets ouverts sont reconstruits.
   int _dataVersion = 0;
+  final _modulesScroll = ScrollController();
+
+  @override
+  void dispose() {
+    _modulesScroll.dispose();
+    super.dispose();
+  }
 
   static const List<ErpModule> _modules = [
     ErpModule('Gestion', Icons.space_dashboard_rounded, [
@@ -717,7 +724,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       ErpMenuItem('Clients', Icons.people_rounded),
       ErpMenuItem('Prestataires', Icons.business_center_rounded),
     ]),
-    ErpModule('Prestation', Icons.room_service_rounded, [
+    ErpModule('Factures', Icons.request_quote_rounded, [
       ErpMenuItem('Facture Client', Icons.request_quote_rounded),
       ErpMenuItem('Facture Prestataire', Icons.receipt_long_rounded),
       ErpMenuItem('Facture Transitaire', Icons.directions_boat_rounded),
@@ -1143,75 +1150,93 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
               icon: const Icon(Icons.menu_rounded, color: Colors.white),
             ),
           if (!isCompact)
+            // Défilement à la souris (glisser) avec une barre visible quand
+            // tous les modules ne tiennent pas sur la largeur de l'écran.
             Expanded(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: _visibleModuleIndexes.map((index) {
-                    final module = _modules[index];
-                    final selected = index == _selectedModuleIndex;
-                    return PopupMenuButton<ErpMenuItem>(
-                      tooltip: module.title,
-                      position: PopupMenuPosition.under,
-                      onSelected: (item) => _selectMenu(index, item),
-                      itemBuilder: (context) => module.items
-                          .where(_menuVisible)
-                          .map(
-                            (item) => PopupMenuItem<ErpMenuItem>(
-                              value: item,
-                              child: ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: 270,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      item.icon,
-                                      size: 20,
-                                      color: const Color(0xFF1A237E),
+              child: ScrollConfiguration(
+                behavior: const _DragEverywhereBehavior(),
+                child: Scrollbar(
+                  controller: _modulesScroll,
+                  thumbVisibility: true,
+                  thickness: 4,
+                  child: SingleChildScrollView(
+                    controller: _modulesScroll,
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: _visibleModuleIndexes.map((index) {
+                        final module = _modules[index];
+                        final selected = index == _selectedModuleIndex;
+                        return PopupMenuButton<ErpMenuItem>(
+                          tooltip: module.title,
+                          position: PopupMenuPosition.under,
+                          onSelected: (item) => _selectMenu(index, item),
+                          itemBuilder: (context) => module.items
+                              .where(_menuVisible)
+                              .map(
+                                (item) => PopupMenuItem<ErpMenuItem>(
+                                  value: item,
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 270,
                                     ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Text(
-                                        item.title,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          item.icon,
+                                          size: 20,
+                                          color: const Color(0xFF1A237E),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Text(
+                                            item.title,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                  ],
+                                  ),
                                 ),
-                              ),
+                              )
+                              .toList(),
+                          // Espacements réduits entre les modules (police inchangée).
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  module.title,
+                                  style: TextStyle(
+                                    color: selected
+                                        ? Colors.white
+                                        : Colors.white.withValues(alpha: 0.88),
+                                    fontSize: 16,
+                                    fontWeight: selected
+                                        ? FontWeight.bold
+                                        : FontWeight.w500,
+                                  ),
+                                ),
+                                // Flèche à sa taille d'origine, sans la marge vide autour.
+                                const SizedBox(
+                                  width: 15,
+                                  child: OverflowBox(
+                                    maxWidth: 21,
+                                    child: Icon(
+                                      Icons.arrow_drop_down,
+                                      color: Colors.white,
+                                      size: 21,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                          )
-                          .toList(),
-                      // Police et espacements réduits : tous les modules tiennent en largeur.
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 5),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              module.title,
-                              style: TextStyle(
-                                color: selected
-                                    ? Colors.white
-                                    : Colors.white.withValues(alpha: 0.88),
-                                fontSize: 13.5,
-                                fontWeight: selected
-                                    ? FontWeight.bold
-                                    : FontWeight.w500,
-                              ),
-                            ),
-                            const Icon(
-                              Icons.arrow_drop_down,
-                              color: Colors.white,
-                              size: 16,
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }).toList(),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -1803,7 +1828,7 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
       case roleCaissierDepenses:
         return {'Caisse'};
       case 'Prestataire':
-        return {'Prestation'};
+        return {'Factures'};
       case 'Transporteur':
         return {'Transport', 'Dossier'};
       case 'Agent Frontière':

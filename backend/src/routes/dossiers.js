@@ -28,7 +28,7 @@ const OPERATION_TYPES = [
 ];
 const CLOSED_INVOICE = 'Clôturée';
 const CLOSED_DOSSIER = 'Clôturé';
-const DOSSIER_MODULES = ['Dossier', 'Transport', 'Prestation', 'Recouvrement', 'Comptabilité'];
+const DOSSIER_MODULES = ['Dossier', 'Transport', 'Factures', 'Recouvrement', 'Comptabilité'];
 
 // Catégorie des règlements rattachés à chaque facture fournisseur.
 const PAYMENT_CATEGORY = {

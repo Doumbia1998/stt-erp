@@ -14,7 +14,7 @@ const {
   sqlDateTimeToFr,
 } = require('../format');
 
-const MODULES = ['Prestation', 'Transport', 'Comptabilité', 'Recouvrement'];
+const MODULES = ['Factures', 'Transport', 'Comptabilité', 'Recouvrement'];
 const saisieSql = (column) =>
   `to_char(${column} AT TIME ZONE 'UTC', 'DD/MM/YYYY HH24:MI')`;
 const round = (value) => Math.round(value * 100) / 100;

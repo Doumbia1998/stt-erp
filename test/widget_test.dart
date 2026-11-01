@@ -415,8 +415,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(inGrid(find.text('Client Test')), findsOneWidget);
 
-    await tester.ensureVisible(find.byTooltip('Prestation'));
-    await tester.tap(find.byTooltip('Prestation'));
+    await tester.ensureVisible(find.byTooltip('Factures'));
+    await tester.tap(find.byTooltip('Factures'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Facture Client').last);
     await tester.pumpAndSettle();
@@ -681,8 +681,8 @@ void main() {
     await tester.enterText(find.byType(TextField).at(1), '1234');
     await tester.tap(find.text('SE CONNECTER'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byTooltip('Prestation'));
-    await tester.tap(find.byTooltip('Prestation'));
+    await tester.ensureVisible(find.byTooltip('Factures'));
+    await tester.tap(find.byTooltip('Factures'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Facture Transitaire').last);
     await tester.pumpAndSettle();
@@ -1078,8 +1078,8 @@ void main() {
     expect(find.text('Bureau DD en cours (1)'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('voyage-stage-all')));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byTooltip('Prestation'));
-    await tester.tap(find.byTooltip('Prestation'));
+    await tester.ensureVisible(find.byTooltip('Factures'));
+    await tester.tap(find.byTooltip('Factures'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Facture Transitaire').last);
     await tester.pumpAndSettle();
@@ -1751,8 +1751,8 @@ void main() {
     await tester.enterText(find.byType(TextField).at(1), '1234');
     await tester.tap(find.text('SE CONNECTER'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byTooltip('Prestation'));
-    await tester.tap(find.byTooltip('Prestation'));
+    await tester.ensureVisible(find.byTooltip('Factures'));
+    await tester.tap(find.byTooltip('Factures'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Facture Transporteur').last);
     await tester.pumpAndSettle();

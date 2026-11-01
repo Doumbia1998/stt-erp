@@ -940,7 +940,7 @@ class MemoryErpBackend implements ErpBackend {
           accessModules: {
             'Gestion',
             'Prestataire & Client',
-            'Prestation',
+            'Factures',
             'Recouvrement',
             'Dossier',
             'Transport',

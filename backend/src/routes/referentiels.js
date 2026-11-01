@@ -181,7 +181,7 @@ function referentielsRouter(pool) {
     }
   });
 
-  router.put('/prestataires/:id', requireModule('Prestataire & Client', 'Prestation', 'Transitaire', 'Transport'), async (req, res, next) => {
+  router.put('/prestataires/:id', requireModule('Prestataire & Client', 'Factures', 'Transitaire', 'Transport'), async (req, res, next) => {
     try {
       const b = req.body;
       const values = [

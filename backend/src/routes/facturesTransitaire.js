@@ -14,7 +14,7 @@ const {
   sqlDateTimeToFr,
 } = require('../format');
 
-const MODULES = ['Prestation', 'Transitaire', 'Comptabilité', 'Recouvrement'];
+const MODULES = ['Factures', 'Transitaire', 'Comptabilité', 'Recouvrement'];
 const saisieSql = (column) =>
   `to_char(${column} AT TIME ZONE 'UTC', 'DD/MM/YYYY HH24:MI')`;
 

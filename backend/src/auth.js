@@ -11,7 +11,7 @@ const ADMIN_ROLE = 'Administrateur';
 const MODULES = [
   'Gestion',
   'Prestataire & Client',
-  'Prestation',
+  'Factures',
   'Recouvrement',
   'Dossier',
   'Transport',
