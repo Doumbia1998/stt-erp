@@ -256,7 +256,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Etat des Impayés'), findsWidgets);
-    await tester.tap(find.byTooltip('Recouvrement'));
+    await tester.ensureVisible(find.byTooltip('Comptabilité'));
+    await tester.tap(find.byTooltip('Comptabilité'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Règlement').last);
     await tester.pumpAndSettle();
@@ -270,10 +271,10 @@ void main() {
     await tester.tapAt(const Offset(20, 200));
     await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.byTooltip('Transport'));
-    await tester.tap(find.byTooltip('Transport'));
+    await tester.ensureVisible(find.byTooltip('Dossier'));
+    await tester.tap(find.byTooltip('Dossier'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Dossier').last);
+    await tester.tap(find.text('Dossiers').last);
     await tester.pumpAndSettle();
 
     expect(find.text('Gestion des Dossiers'), findsOneWidget);
@@ -319,10 +320,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('+223 76 111 2222'), findsOneWidget);
 
-    await tester.ensureVisible(find.byTooltip('Transport'));
-    await tester.tap(find.byTooltip('Transport'));
+    await tester.ensureVisible(find.byTooltip('Dossier'));
+    await tester.tap(find.byTooltip('Dossier'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Dossier').last);
+    await tester.tap(find.text('Dossiers').last);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('dossier-new')));
     await tester.pumpAndSettle();
@@ -536,14 +537,14 @@ void main() {
     await tester.pumpAndSettle();
     final drawerTransport = find.descendant(
       of: find.byType(Drawer),
-      matching: find.text('Transport'),
+      matching: find.text('Dossier'),
     );
     await tester.ensureVisible(drawerTransport);
     await tester.tap(drawerTransport);
     await tester.pumpAndSettle();
     final drawerDossier = find.descendant(
       of: find.byType(Drawer),
-      matching: find.text('Dossier'),
+      matching: find.text('Dossiers'),
     );
     await tester.tap(drawerDossier);
     await tester.pumpAndSettle();
@@ -2196,8 +2197,8 @@ void main() {
     expect(find.byKey(const ValueKey('caisse-cloture')), findsOneWidget);
 
     // Le comptable impute l'encaissement pointé par la caissière.
-    await tester.ensureVisible(find.byTooltip('Recouvrement'));
-    await tester.tap(find.byTooltip('Recouvrement'));
+    await tester.ensureVisible(find.byTooltip('Comptabilité'));
+    await tester.tap(find.byTooltip('Comptabilité'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Règlement').last);
     await tester.pumpAndSettle();

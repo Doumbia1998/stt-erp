@@ -960,6 +960,7 @@ class _HomePageState extends State<HomePage> {
             PopupMenuButton<ErpMenuItem>(
               tooltip:
                   'Accès rapide : ${_MainNavigationPageState._modules[index].title}',
+              position: PopupMenuPosition.under,
               onSelected: (item) => widget.onSelectMenu(index, item),
               itemBuilder: (context) => [
                 for (final item

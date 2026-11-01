@@ -12,6 +12,7 @@ const MODULES = [
   'Gestion',
   'Prestation',
   'Recouvrement',
+  'Dossier',
   'Transport',
   'Transitaire',
   'Comptabilité',

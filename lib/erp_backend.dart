@@ -941,6 +941,7 @@ class MemoryErpBackend implements ErpBackend {
             'Gestion',
             'Prestation',
             'Recouvrement',
+            'Dossier',
             'Transport',
             'Transitaire',
             'Comptabilité',

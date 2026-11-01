@@ -685,6 +685,7 @@ class MainNavigationPage extends StatefulWidget {
       'Gestion',
       'Prestation',
       'Recouvrement',
+      'Dossier',
       'Transport',
       'Transitaire',
       'Comptabilité',
@@ -721,16 +722,15 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
     ErpModule('Recouvrement', Icons.price_check_rounded, [
       ErpMenuItem('Etat des Impayés', Icons.receipt_long_rounded),
       ErpMenuItem('Relance des Impayés', Icons.notifications_active_rounded),
-      ErpMenuItem('Règlement', Icons.payments_rounded),
       ErpMenuItem(
         'Saisie des Règlements Transporteurs',
         Icons.local_shipping_rounded,
       ),
     ]),
+    ErpModule('Dossier', Icons.folder_copy_rounded, [
+      ErpMenuItem('Dossiers', Icons.folder_copy_rounded),
+    ]),
     ErpModule('Transport', Icons.local_shipping_rounded, [
-      ErpMenuItem('Dossier', Icons.folder_copy_rounded),
-      ErpMenuItem('Gestion des dépenses', Icons.money_off_csred_rounded),
-      ErpMenuItem('Gestion des Avances', Icons.account_balance_wallet_rounded),
       ErpMenuItem('Voyages', Icons.route_rounded),
       ErpMenuItem('Transporteurs', Icons.local_shipping_outlined),
       ErpMenuItem('Historique', Icons.history_rounded),
@@ -771,7 +771,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       ErpMenuItem('Balance des Comptes', Icons.balance_rounded),
       ErpMenuItem('Balance Agées', Icons.pending_actions_rounded),
       ErpMenuItem('Control des Caisses', Icons.point_of_sale_rounded),
-      ErpMenuItem('Règlements', Icons.payments_rounded),
+      ErpMenuItem('Règlement', Icons.payments_rounded),
       ErpMenuItem('Interrogation et Lettrage', Icons.search_rounded),
       ErpMenuItem('Grand-Livre des Tiers', Icons.menu_book_rounded),
       ErpMenuItem('Saisie des Journaux', Icons.edit_note_rounded),
@@ -949,7 +949,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           onSelectMenu: _selectMenu,
           availableModuleIndexes: _visibleModuleIndexes,
         );
-      case 'Dossier':
+      case 'Dossiers':
         return DossiersPage(
           dossiers: _dossiers,
           clients: _clients,
@@ -1158,6 +1158,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                     final selected = index == _selectedModuleIndex;
                     return PopupMenuButton<ErpMenuItem>(
                       tooltip: module.title,
+                      position: PopupMenuPosition.under,
                       onSelected: (item) => _selectMenu(index, item),
                       itemBuilder: (context) => module.items
                           .where(_menuVisible)
@@ -1809,7 +1810,7 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
       case 'Prestataire':
         return {'Prestation'};
       case 'Transporteur':
-        return {'Transport'};
+        return {'Transport', 'Dossier'};
       case 'Agent Frontière':
         return {'Frontière'};
       case 'Agent Bureau DD':
@@ -1817,7 +1818,7 @@ class _ErpUserFormDialogState extends State<_ErpUserFormDialog> {
       case 'Agent Enquête':
         return {'Enquête'};
       default:
-        return {'Gestion', 'Transport'};
+        return {'Gestion', 'Dossier', 'Transport'};
     }
   }
 
