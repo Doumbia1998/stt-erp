@@ -214,7 +214,9 @@ class _HomePageState extends State<HomePage> {
           final compact = constraints.maxWidth < 900;
           final pad = compact ? 14.0 : 26.0;
           final width = math.min(constraints.maxWidth, 1440.0) - pad * 2;
-          final kpiWidth = compact ? (width - 12) / 2 : (width - 4 * 14) / 5;
+          final kpiWidth = compact
+              ? ((width - 14) / 2).floorToDouble()
+              : ((width - 4 * 14) / 5).floorToDouble();
           return Scrollbar(
             thumbVisibility: true,
             child: SingleChildScrollView(

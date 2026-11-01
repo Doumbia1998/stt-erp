@@ -2332,4 +2332,22 @@ void main() {
     expect(facture.reglements.single.montant, 1500000);
     expect(facture.reliquat, 1000000);
   });
+
+  testWidgets('Dashboard shows two indicators per row on a phone', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 860);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(const TransitTrackerApp());
+    await tester.enterText(find.byType(TextField).at(0), 'admin');
+    await tester.enterText(find.byType(TextField).at(1), '1234');
+    await tester.tap(find.text('SE CONNECTER'));
+    await tester.pumpAndSettle();
+    final ca = tester.getTopLeft(find.text('Chiffre d’affaires'));
+    final enc = tester.getTopLeft(find.text('Encaissements'));
+    expect(enc.dy, ca.dy);
+    expect(enc.dx, greaterThan(ca.dx));
+  });
 }
