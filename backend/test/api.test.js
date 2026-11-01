@@ -93,7 +93,7 @@ test('login rejects wrong credentials and protects data routes', async () => {
   });
   assert.equal(ok.status, 200);
   assert.equal(ok.body.utilisateur.role, 'Administrateur');
-  assert.equal(ok.body.utilisateur.modules.length, 13);
+  assert.equal(ok.body.utilisateur.modules.length, 14);
   token = ok.body.jeton;
 });
 

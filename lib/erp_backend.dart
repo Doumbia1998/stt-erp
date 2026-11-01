@@ -939,6 +939,7 @@ class MemoryErpBackend implements ErpBackend {
           role: 'Administrateur',
           accessModules: {
             'Gestion',
+            'Prestataire & Client',
             'Prestation',
             'Recouvrement',
             'Dossier',

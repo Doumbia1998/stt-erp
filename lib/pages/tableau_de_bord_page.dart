@@ -997,9 +997,13 @@ class _HomePageState extends State<HomePage> {
                       color: _tbBlue,
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      _MainNavigationPageState._modules[index].title,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    Flexible(
+                      child: Text(
+                        _MainNavigationPageState._modules[index].title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
                     ),
                   ],
                 ),

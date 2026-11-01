@@ -132,7 +132,7 @@ async function linkTiersAccount(client, tiersId, previousCode, newCode) {
 function referentielsRouter(pool) {
   const router = express.Router();
 
-  router.put('/clients/:id', requireModule('Transitaire', 'Transport'), async (req, res, next) => {
+  router.put('/clients/:id', requireModule('Prestataire & Client', 'Transitaire', 'Transport'), async (req, res, next) => {
     try {
       const b = req.body;
       const values = [
@@ -181,7 +181,7 @@ function referentielsRouter(pool) {
     }
   });
 
-  router.put('/prestataires/:id', requireModule('Prestation', 'Transitaire', 'Transport'), async (req, res, next) => {
+  router.put('/prestataires/:id', requireModule('Prestataire & Client', 'Prestation', 'Transitaire', 'Transport'), async (req, res, next) => {
     try {
       const b = req.body;
       const values = [

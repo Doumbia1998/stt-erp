@@ -285,8 +285,8 @@ void main() {
     await tester.tap(find.text('Compris'));
     await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.byTooltip('Transitaire'));
-    await tester.tap(find.byTooltip('Transitaire'));
+    await tester.ensureVisible(find.byTooltip('Prestataire & Client'));
+    await tester.tap(find.byTooltip('Prestataire & Client'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Clients').last);
     await tester.pumpAndSettle();
@@ -485,14 +485,14 @@ void main() {
     expect(find.byKey(const ValueKey('header-stt-logo')), findsOneWidget);
     final drawerPrestation = find.descendant(
       of: find.byType(Drawer),
-      matching: find.text('Prestation'),
+      matching: find.text('Prestataire & Client'),
     );
     await tester.ensureVisible(drawerPrestation);
     await tester.tap(drawerPrestation);
     await tester.pumpAndSettle();
     final drawerProvider = find.descendant(
       of: find.byType(Drawer),
-      matching: find.text('Espace Prestataire'),
+      matching: find.text('Prestataires'),
     );
     await tester.tap(drawerProvider);
     await tester.pumpAndSettle();
@@ -1426,7 +1426,7 @@ void main() {
     }
 
     // Fiche client : tous les clients partagent le compte général 41100000.
-    await open('Transitaire', 'Clients');
+    await open('Prestataire & Client', 'Clients');
     await tester.tap(find.byIcon(Icons.person_add_alt_1_rounded));
     await tester.pumpAndSettle();
     final picker = find.descendant(

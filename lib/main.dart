@@ -683,6 +683,7 @@ class MainNavigationPage extends StatefulWidget {
     this.userRole = 'Administrateur',
     this.authorizedModules = const {
       'Gestion',
+      'Prestataire & Client',
       'Prestation',
       'Recouvrement',
       'Dossier',
@@ -712,12 +713,15 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       ErpMenuItem('Gestion utilisateur', Icons.manage_accounts_rounded),
       ErpMenuItem('Indicateur Performance (KPI)', Icons.insights_rounded),
     ]),
+    ErpModule('Prestataire & Client', Icons.groups_rounded, [
+      ErpMenuItem('Clients', Icons.people_rounded),
+      ErpMenuItem('Prestataires', Icons.business_center_rounded),
+    ]),
     ErpModule('Prestation', Icons.room_service_rounded, [
       ErpMenuItem('Facture Client', Icons.request_quote_rounded),
       ErpMenuItem('Facture Prestataire', Icons.receipt_long_rounded),
       ErpMenuItem('Facture Transitaire', Icons.directions_boat_rounded),
       ErpMenuItem('Facture Transporteur', Icons.local_shipping_rounded),
-      ErpMenuItem('Espace Prestataire', Icons.business_center_rounded),
     ]),
     ErpModule('Recouvrement', Icons.price_check_rounded, [
       ErpMenuItem('Etat des Impayés', Icons.receipt_long_rounded),
@@ -748,7 +752,6 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
     ]),
     ErpModule('Transitaire', Icons.directions_boat_rounded, [
       ErpMenuItem('Gestion des Transitaires & Chargeurs', Icons.groups_rounded),
-      ErpMenuItem('Clients', Icons.people_rounded),
     ]),
     ErpModule('Dépenses & Frais', Icons.local_gas_station_rounded, [
       ErpMenuItem('Paiement Frais', Icons.local_gas_station_rounded),
@@ -954,7 +957,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
         );
       case 'Clients':
         return ClientsPage(clients: _clients, comptes: _planAccounts);
-      case 'Espace Prestataire':
+      case 'Prestataires':
         return PrestatairesPage(
           prestataires: _prestataires,
           comptes: _planAccounts,

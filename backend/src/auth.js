@@ -10,6 +10,7 @@ const MIN_PASSWORD_LENGTH = 8;
 const ADMIN_ROLE = 'Administrateur';
 const MODULES = [
   'Gestion',
+  'Prestataire & Client',
   'Prestation',
   'Recouvrement',
   'Dossier',
