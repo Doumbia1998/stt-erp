@@ -693,7 +693,6 @@ class MainNavigationPage extends StatefulWidget {
       'Recouvrement',
       'Dossier',
       'Transport',
-      'Transitaire',
       'Comptabilité',
       'RH & Paie',
       'Frontière',
@@ -762,9 +761,6 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       ErpMenuItem('Tableau de bord Enquête', Icons.space_dashboard_rounded),
       ErpMenuItem('Enquêtes', Icons.manage_search_rounded),
       ErpMenuItem('Factures Enquête', Icons.receipt_long_rounded),
-    ]),
-    ErpModule('Transitaire', Icons.directions_boat_rounded, [
-      ErpMenuItem('Gestion des Transitaires & Chargeurs', Icons.groups_rounded),
     ]),
     ErpModule('Dépenses & Frais', Icons.local_gas_station_rounded, [
       ErpMenuItem('Paiement Frais', Icons.local_gas_station_rounded),
