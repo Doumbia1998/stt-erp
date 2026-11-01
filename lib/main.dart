@@ -22,6 +22,7 @@ export 'models.dart';
 
 part 'pages/balance_comptes_page.dart';
 part 'pages/caisse_page.dart';
+part 'pages/client_historique_page.dart';
 part 'pages/comptabilite_pages.dart';
 part 'pages/dossier_dialogs.dart';
 part 'pages/depenses_frais_page.dart';
@@ -4952,6 +4953,11 @@ class ClientsPage extends StatefulWidget {
 }
 
 class _ClientsPageState extends State<ClientsPage> {
+  Future<void> _openHistory(Client client) => Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) => ClientHistoriquePage(client: client)),
+  );
+
   String q = "";
 
   @override
@@ -5016,11 +5022,24 @@ class _ClientsPageState extends State<ClientsPage> {
                   '${fil[i].telephone}\nCompte client : ${fil[i].compteComptable}',
                 ),
                 isThreeLine: true,
-                trailing: IconButton(
-                  key: ValueKey('edit-client-${fil[i].id}'),
-                  tooltip: 'Modifier le client',
-                  onPressed: () => _openClientForm(fil[i]),
-                  icon: const Icon(Icons.edit_outlined),
+                // Un clic sur le client ouvre son historique.
+                onTap: () => _openHistory(fil[i]),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      key: ValueKey('history-client-${fil[i].id}'),
+                      tooltip: 'Historique du client',
+                      onPressed: () => _openHistory(fil[i]),
+                      icon: const Icon(Icons.history_rounded),
+                    ),
+                    IconButton(
+                      key: ValueKey('edit-client-${fil[i].id}'),
+                      tooltip: 'Modifier le client',
+                      onPressed: () => _openClientForm(fil[i]),
+                      icon: const Icon(Icons.edit_outlined),
+                    ),
+                  ],
                 ),
               ),
             ),

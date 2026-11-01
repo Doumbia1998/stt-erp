@@ -2354,4 +2354,73 @@ void main() {
     expect(enc.dy, ca.dy);
     expect(enc.dx, greaterThan(ca.dx));
   });
+
+  testWidgets('A client history lists invoices, payments and the balance', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final backend = erpBackend as MemoryErpBackend;
+    final client = Client(
+      id: 'client-h',
+      nom: 'Lassine Doumbia',
+      telephone: '74 74 57 58',
+      compteComptable: '411MLD-1',
+    );
+    final dossier = TransitDossier(
+      id: 'dossier-h',
+      numDossier: 'STT-H1',
+      numBL: 'BL-H1',
+      numLB: '',
+      client: client,
+      nbConteneurs: 0,
+      dateDebut: '20/10/2026',
+    );
+    dossier.factureClient
+      ..reference = 'FA301026'
+      ..statut = 'Clôturée'
+      ..montant = 6200000
+      ..dateEmission = '30/10/2026';
+    dossier.operations.add(
+      DossierOperation(
+        type: DossierOperationType.clientPayment,
+        titre: 'RC-00009',
+        montant: 505000,
+        date: '31/10/2026 10:00',
+        modePaiement: 'Espèces',
+      ),
+    );
+    backend
+      ..clients.add(client)
+      ..dossiers.add(dossier);
+
+    await tester.pumpWidget(const TransitTrackerApp());
+    await tester.enterText(find.byType(TextField).at(0), 'admin');
+    await tester.enterText(find.byType(TextField).at(1), '1234');
+    await tester.tap(find.text('SE CONNECTER'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Prestataire & Client'));
+    await tester.tap(find.byTooltip('Prestataire & Client'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Clients').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lassine Doumbia'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('LASSINE DOUMBIA'), findsOneWidget);
+    expect(find.text('FACTURE FA301026'), findsOneWidget);
+    expect(find.text('RÈGLEMENT RC-00009'), findsOneWidget);
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('client-history-reste')))
+          .data,
+      '${formatCurrency(5695000)} FCFA',
+    );
+    await tester.tap(find.textContaining('Règlements ('));
+    await tester.pumpAndSettle();
+    expect(find.text('FACTURE FA301026'), findsNothing);
+    expect(find.text('RÈGLEMENT RC-00009'), findsOneWidget);
+  });
 }
