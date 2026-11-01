@@ -28,6 +28,7 @@ const {
 const { facturesAgentRouter, loadFacturesAgent } = require('./routes/facturesAgent');
 const { bonsCaisseRouter, loadBonsCaisse } = require('./routes/bonsCaisse');
 const { caisseRouter, loadCaisse } = require('./routes/caisse');
+const { administrationRouter } = require('./routes/administration');
 
 function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
   const app = express();
@@ -177,6 +178,7 @@ function createApp({ pool, corsOrigins = process.env.CORS_ORIGINS }) {
   api.use(facturesAgentRouter(pool));
   api.use(bonsCaisseRouter(pool));
   api.use(caisseRouter(pool));
+  api.use(administrationRouter(pool));
   app.use('/api/v1', api);
 
   app.use((_req, res) => {

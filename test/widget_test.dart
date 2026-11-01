@@ -2423,4 +2423,48 @@ void main() {
     expect(find.text('FACTURE FA301026'), findsNothing);
     expect(find.text('RÈGLEMENT RC-00009'), findsOneWidget);
   });
+
+  testWidgets('The administrator deletes test data one by one', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final backend = erpBackend as MemoryErpBackend;
+    final client = Client(id: 'client-z', nom: 'Client Test Z', telephone: '');
+    TransitDossier dossier(String id) => TransitDossier(
+      id: id,
+      numDossier: 'STT-$id',
+      numBL: '',
+      numLB: '',
+      client: client,
+      nbConteneurs: 0,
+      dateDebut: '01/11/2026',
+    );
+    backend
+      ..clients.add(client)
+      ..dossiers.addAll([dossier('z1'), dossier('z2')]);
+    await tester.pumpWidget(const TransitTrackerApp());
+    await tester.enterText(find.byType(TextField).at(0), 'admin');
+    await tester.enterText(find.byType(TextField).at(1), '1234');
+    await tester.tap(find.text('SE CONNECTER'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Gestion'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Supprimer des données').last);
+    await tester.pumpAndSettle();
+
+    // Un seul dossier supprimé : l'autre et le client restent.
+    final delete = find.byKey(const ValueKey('delete-dossier-z1'));
+    await tester.ensureVisible(delete);
+    await tester.tap(delete);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('delete-confirm')));
+    await tester.pumpAndSettle();
+    expect(backend.dossiers.map((d) => d.id), ['z2']);
+    expect(backend.clients, hasLength(1));
+    expect(find.byKey(const ValueKey('delete-dossier-z1')), findsNothing);
+    expect(find.byKey(const ValueKey('delete-dossier-z2')), findsOneWidget);
+  });
 }

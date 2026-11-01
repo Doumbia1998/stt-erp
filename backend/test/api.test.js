@@ -1162,3 +1162,53 @@ test('the cash desks collect invoices, pay vouchers, transfer and close the day'
   assert.ok(cp.body.some((l) => l.compte === '571001' && l.debit === 300000));
   assert.ok(!cp.body.some((l) => l.compte === '571001' && l.debit === 200000));
 });
+
+test('the administrator deletes test data one item at a time', async () => {
+  const del = (type, id, auth) => call('DELETE', `/administration/elements/${type}/${id}`, undefined, auth);
+  assert.equal((await del('inconnu', 'x')).status, 400);
+  assert.equal((await del('dossier', 'nexistepas')).status, 404);
+  const login = await call('POST', '/auth/connexion', { identifiant: 'compta', motDePasse: 'compta-2026' });
+  if (login.status === 200) {
+    assert.equal((await del('dossier', 'dc1', login.body.jeton)).status, 403);
+  }
+
+  // Un bon payé par la caisse (verrouillé en temps normal) part avec son paiement.
+  assert.equal((await call('DELETE', '/bons-caisse/bc-1')).status, 409);
+  assert.equal((await del('bon-caisse', 'bc-1')).status, 204);
+  let data = await call('GET', '/donnees');
+  assert.ok(!data.body.bonsCaisse.some((b) => b.id === 'bc-1'));
+  assert.ok(!data.body.caisse.mouvements.some((m) => m.bonId === 'bc-1'));
+
+  // Un encaissement imputé : le règlement client disparaît du dossier.
+  assert.equal((await del('mouvement-caisse', 'rc-2')).status, 204);
+  data = await call('GET', '/donnees');
+  const dc1 = data.body.dossiers.find((d) => d.id === 'dc1');
+  assert.ok(!dc1.operations.some((o) => o.id.startsWith('rc-2')));
+
+  // Un dossier avec règlements et reçus de caisse (verrouillé en temps normal).
+  assert.equal((await call('DELETE', '/dossiers/dc1')).status, 409);
+  assert.equal((await del('dossier', 'dc1')).status, 204);
+  data = await call('GET', '/donnees');
+  assert.ok(!data.body.dossiers.some((d) => d.id === 'dc1'));
+  assert.ok(!data.body.caisse.mouvements.some((m) => m.dossierId === 'dc1'));
+
+  // Un client part avec tous ses dossiers ; un prestataire avec ses factures.
+  const clientId = data.body.dossiers[0]?.clientId;
+  if (clientId) {
+    assert.equal((await del('client', clientId)).status, 204);
+    data = await call('GET', '/donnees');
+    assert.ok(!data.body.clients.some((c) => c.id === clientId));
+    assert.ok(!data.body.dossiers.some((d) => d.clientId === clientId));
+  }
+  const carrier = data.body.facturesTransporteur[0]?.transporteurId;
+  if (carrier) {
+    assert.equal((await del('prestataire', carrier)).status, 204);
+    data = await call('GET', '/donnees');
+    assert.ok(!data.body.prestataires.some((p) => p.id === carrier));
+    assert.ok(!data.body.facturesTransporteur.some((f) => f.transporteurId === carrier));
+  }
+  // Les référentiels restent.
+  assert.ok(data.body.comptes.length > 0);
+  assert.ok(data.body.journaux.length > 0);
+});
+

@@ -33,6 +33,7 @@ part 'pages/frais_caisse_pages.dart';
 part 'pages/journal_saisie_page.dart';
 part 'pages/tableau_de_bord_page.dart';
 part 'pages/reglements_page.dart';
+part 'pages/reinitialisation_page.dart';
 part 'pages/transporteurs_page.dart';
 part 'pages/voyage_modules_page.dart';
 part 'pages/voyages_page.dart';
@@ -270,6 +271,9 @@ class _ErpRefreshButtonState extends State<ErpRefreshButton> {
 
 // Rubriques masquées selon le rôle : chaque caissière ne voit que sa caisse.
 bool _menuVisible(ErpMenuItem item) => switch (_currentUser?.role) {
+  // La suppression des données de test est réservée à l'administrateur.
+  _ when item.title == 'Supprimer des données' =>
+    _currentUser?.role == 'Administrateur',
   roleCaissierPrincipal => item.title != 'Caisse Dépenses',
   roleCaissierDepenses => item.title != 'Caisse Encaissement',
   _ => true,
@@ -720,6 +724,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       ErpMenuItem('Accueil', Icons.home_rounded),
       ErpMenuItem('Gestion utilisateur', Icons.manage_accounts_rounded),
       ErpMenuItem('Indicateur Performance (KPI)', Icons.insights_rounded),
+      ErpMenuItem('Supprimer des données', Icons.delete_sweep_rounded),
     ]),
     ErpModule('Prestataire & Client', Icons.groups_rounded, [
       ErpMenuItem('Clients', Icons.people_rounded),
@@ -1074,6 +1079,8 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
           moduleNames: _modules.map((module) => module.title).toList(),
           currentUserRole: widget.userRole,
         );
+      case 'Supprimer des données':
+        return const ReinitialisationPage();
       case 'Etat des Impayés':
         return EtatImpayesPage();
       case 'Caisse Encaissement':

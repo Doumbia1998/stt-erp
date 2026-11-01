@@ -268,6 +268,9 @@ abstract class ErpBackend {
     double credit = 0,
   });
   Future<void> supprimerLigneEcriture(EcritureLigne ligne);
+  // Administrateur : supprime un élément de test (dossier, client, facture…)
+  // avec ce qui en dépend.
+  Future<void> supprimerElement(String type, String id);
   Future<List<BalanceLigne>> balanceComptes({
     required String du,
     required String au,
@@ -886,6 +889,12 @@ class HttpErpBackend implements ErpBackend {
   @override
   Future<void> supprimerLigneEcriture(EcritureLigne ligne) =>
       _send('DELETE', '/comptabilite/ecritures/lignes/${ligne.ligne}');
+
+  @override
+  Future<void> supprimerElement(String type, String id) => _send(
+    'DELETE',
+    '/administration/elements/${_segment(type)}/${_segment(id)}',
+  );
 
   @override
   Future<void> saveDossier(TransitDossier dossier) async {
@@ -1604,6 +1613,44 @@ class MemoryErpBackend implements ErpBackend {
   @override
   Future<void> supprimerLigneEcriture(EcritureLigne ligne) async =>
       lignesEcriture.removeWhere((l) => l.$2.ligne == ligne.ligne);
+
+  @override
+  Future<void> supprimerElement(String type, String id) async {
+    if (_user?.role != 'Administrateur') {
+      throw const ErpBackendException(
+        'Réservé à l’administrateur.',
+        status: 403,
+      );
+    }
+    switch (type) {
+      case 'dossier':
+        dossiers.removeWhere((d) => d.id == id);
+        caisseMouvements.removeWhere((m) => m.dossierId == id);
+      case 'client':
+        final ids = dossiers
+            .where((d) => d.client.id == id)
+            .map((d) => d.id)
+            .toSet();
+        dossiers.removeWhere((d) => ids.contains(d.id));
+        caisseMouvements.removeWhere((m) => ids.contains(m.dossierId));
+        clients.removeWhere((c) => c.id == id);
+      case 'prestataire':
+        facturesTransitaire.removeWhere((f) => f.transitaireId == id);
+        facturesTransporteur.removeWhere((f) => f.transporteurId == id);
+        prestataires.removeWhere((p) => p.id == id);
+      case 'facture-transitaire':
+        facturesTransitaire.removeWhere((f) => f.id == id);
+      case 'facture-transporteur':
+        facturesTransporteur.removeWhere((f) => f.id == id);
+      case 'facture-agent':
+        facturesAgent.removeWhere((f) => f.id == id);
+      case 'bon-caisse':
+        caisseMouvements.removeWhere((m) => m.bonId == id);
+        bonsCaisse.removeWhere((b) => b.id == id);
+      case 'mouvement-caisse':
+        caisseMouvements.removeWhere((m) => m.id == id);
+    }
+  }
 
   @override
   Future<List<BalanceLigne>> balanceComptes({
