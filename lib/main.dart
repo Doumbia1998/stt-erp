@@ -1210,7 +1210,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                                 color: selected
                                     ? Colors.white
                                     : Colors.white.withValues(alpha: 0.88),
-                                fontSize: 15,
+                                fontSize: 15.5,
                                 fontWeight: selected
                                     ? FontWeight.bold
                                     : FontWeight.w500,
